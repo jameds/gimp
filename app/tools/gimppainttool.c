@@ -486,7 +486,7 @@ gimp_paint_tool_modifier_key (GimpTool        *tool,
   if (paint_tool->pick_colors && ! paint_tool->draw_line)
     {
       if ((state & gimp_get_all_modifiers_mask ()) ==
-          gimp_get_constrain_behavior_mask ())
+          GDK_MOD1_MASK)
         {
           if (! gimp_color_tool_is_enabled (GIMP_COLOR_TOOL (tool)))
             {

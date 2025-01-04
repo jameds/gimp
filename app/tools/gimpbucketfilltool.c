@@ -777,7 +777,7 @@ gimp_bucket_fill_tool_modifier_key (GimpTool        *tool,
 {
   GimpBucketFillOptions *options = GIMP_BUCKET_FILL_TOOL_GET_OPTIONS (tool);
 
-  if (key == GDK_MOD1_MASK)
+  if (key == gimp_get_toggle_behavior_mask ())
     {
       if (press)
         {
@@ -804,7 +804,7 @@ gimp_bucket_fill_tool_modifier_key (GimpTool        *tool,
                         NULL);
         }
     }
-  else if (key == gimp_get_toggle_behavior_mask ())
+  else if (key == GDK_MOD1_MASK)
     {
       GimpToolInfo *info = gimp_get_tool_info (display->gimp,
                                                "gimp-color-picker-tool");
