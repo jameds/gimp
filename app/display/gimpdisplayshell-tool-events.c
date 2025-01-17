@@ -1890,8 +1890,8 @@ gimp_display_shell_handle_scrolling (GimpDisplayShell *shell,
           /* Size in image pixels: distance between start and current
            * position.
            */
-          size = (gint) (sqrt (pow ((x - shell->scroll_start_x) / shell->scale_x, 2) +
-                               pow ((y - shell->scroll_start_y) / shell->scale_y, 2)));
+          size = (gint) (sqrt (pow ((x - shell->scroll_start_x) / 16, 2) +
+                               pow ((y - shell->scroll_start_y) / 16, 2)));
 
           /* TODO: different logics with "lock brush to view". */
           /* TODO 2: scale aware? */
