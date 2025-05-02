@@ -55,6 +55,7 @@
 #include "display/gimpdisplayshell.h"
 #include "display/gimpdisplayshell-transform.h"
 
+#include "tools/gimptool.h"
 #include "tools/gimptools-utils.h"
 #include "tools/tool_manager.h"
 
@@ -92,8 +93,18 @@ edit_undo_cmd_callback (GimpAction *action,
 {
   GimpImage   *image;
   GimpDisplay *display;
+  GimpTool *tool;
   return_if_no_image (image, data);
   return_if_no_display (display, data);
+
+  // jartha: with OpenTabletDriver Artist mode, Undo/Redo
+  // actions may be triggered while drawing.
+  // This results in corruption of the undo buffer, so the
+  // following simply checks if the current tool is in an
+  // active state before committing an undo/redo.
+  tool = tool_manager_get_active(image->gimp);
+  if (tool && tool->button_press_state)
+	  return;
 
   if (tool_manager_undo_active (image->gimp, display) ||
       gimp_image_undo (image))
@@ -109,8 +120,18 @@ edit_redo_cmd_callback (GimpAction *action,
 {
   GimpImage   *image;
   GimpDisplay *display;
+  GimpTool *tool;
   return_if_no_image (image, data);
   return_if_no_display (display, data);
+
+  // jartha: with OpenTabletDriver Artist mode, Undo/Redo
+  // actions may be triggered while drawing.
+  // This results in corruption of the undo buffer, so the
+  // following simply checks if the current tool is in an
+  // active state before committing an undo/redo.
+  tool = tool_manager_get_active(image->gimp);
+  if (tool && tool->button_press_state)
+	  return;
 
   if (tool_manager_redo_active (image->gimp, display) ||
       gimp_image_redo (image))
