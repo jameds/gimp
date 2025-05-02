@@ -535,6 +535,8 @@ gimp_gegl_op_blacklisted (const gchar *name,
     "gegl:high-pass",
     "gegl:hue-chroma",
     "gegl:illusion",
+    "gegl:json:dropshadow2",
+    "gegl:json:grey2",
     "gegl:image-gradient",
     "gegl:invert-linear",
     "gegl:invert-gamma",
@@ -614,7 +616,7 @@ gimp_gegl_op_blacklisted (const gchar *name,
     "gegl:ditto", /* pointless */
     "gegl:fill-path",
     "gegl:gray", /* we use gimp's op */
-    "gegl:hstack", /* pointless */
+    "gegl:hstack", /* deleted from GEGL and replaced by gegl:pack */
     "gegl:introspect", /* pointless */
     "gegl:layer", /* we use gimp's ops */
     "gegl:lcms-from-profile", /* not usable here */
@@ -624,6 +626,7 @@ gimp_gegl_op_blacklisted (const gchar *name,
     "gegl:matting-global", /* used in the foreground select tool */
     "gegl:matting-levin", /* used in the foreground select tool */
     "gegl:opacity", /* poinless */
+    "gegl:pack", /* pointless */
     "gegl:path",
     "gegl:posterize", /* we use gimp's op */
     "gegl:radial-gradient", /* we use the blend tool */

@@ -23,7 +23,7 @@ if (-not $GITLAB_CI)
 
 
 # Install the required (pre-built) packages for babl, GEGL and GIMP (again)
-Invoke-Expression ((Get-Content build\windows\1_build-deps-msys2.ps1 | Select-String 'MSYS2_PREFIX =' -Context 0,17) -replace '> ','')
+Invoke-Expression ((Get-Content build\windows\1_build-deps-msys2.ps1 | Select-String 'MSYS_ROOT\)' -Context 0,13) -replace '> ','')
 
 if ($GITLAB_CI)
   {
@@ -32,31 +32,26 @@ if ($GITLAB_CI)
 
 
 # Prepare env
-if (-not $GITLAB_CI)
+if (-not $GIMP_PREFIX)
   {
-    if (-not $GIMP_PREFIX)
-      {
-        #FIXME:'gimpenv' have buggy code about Windows paths. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/12284
-        $GIMP_PREFIX = "$PWD\..\_install".Replace('\', '/')
-      }
-
-    Invoke-Expression ((Get-Content .gitlab-ci.yml | Select-String 'win_environ\[' -Context 0,5) -replace '> ','' -replace '- ','')
+    #FIXME:'gimpenv' have buggy code about Windows paths. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/12284
+    $GIMP_PREFIX = "$PWD\..\_install".Replace('\', '/')
   }
+
+Invoke-Expression ((Get-Content .gitlab-ci.yml | Select-String 'win_environ\[' -Context 0,7) -replace '> ','' -replace '- ','')
 
 
 # Build GIMP
 Write-Output "$([char]27)[0Ksection_start:$(Get-Date -UFormat %s -Millisecond 0):gimp_build[collapsed=true]$([char]13)$([char]27)[0KBuilding GIMP"
 if (-not (Test-Path _build-$MSYSTEM_PREFIX\build.ninja -Type Leaf))
   {
-    #FIXME: g-ir-doc is broken. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/11200
-    #There is no GJS for Windows. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/5891
+    #FIXME: There is no GJS for Windows. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/5891
     meson setup _build-$MSYSTEM_PREFIX -Dprefix="$GIMP_PREFIX" -Djavascript=disabled `
-                                       -Ddirectx-sdk-dir="$MSYS2_PREFIX/$MSYSTEM_PREFIX" -Denable-default-bin=enabled `
-                                       -Dbuild-id='org.gimp.GIMP_official' $INSTALLER_OPTION $STORE_OPTION $NON_RELOCATABLE_OPTION
+                                       -Ddirectx-sdk-dir="$MSYS_ROOT/$MSYSTEM_PREFIX" -Denable-default-bin=enabled `
+                                       -Dbuild-id='org.gimp.GIMP_official' $INSTALLER_OPTION $STORE_OPTION $PKGCONF_RELOCATABLE_OPTION $NON_RELOCATABLE_OPTION
   }
 Set-Location _build-$MSYSTEM_PREFIX
 ninja
-ccache --show-stats
 Write-Output "$([char]27)[0Ksection_end:$(Get-Date -UFormat %s -Millisecond 0):gimp_build$([char]13)$([char]27)[0K"
 
 

@@ -217,6 +217,278 @@ gimp_param_spec_object_duplicate (GParamSpec *pspec)
 
 
 /*
+ * GIMP_TYPE_PARAM_FILE
+ */
+
+#define GIMP_PARAM_SPEC_FILE(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_FILE, GimpParamSpecFile))
+
+typedef struct _GimpParamSpecFile GimpParamSpecFile;
+
+struct _GimpParamSpecFile
+{
+  GimpParamSpecObject   parent_instance;
+
+  /*< private >*/
+  GimpFileChooserAction action;
+  gboolean              none_ok;
+};
+
+static void         gimp_param_file_class_init     (GimpParamSpecObjectClass *klass);
+static void         gimp_param_file_init           (GimpParamSpecFile        *fspec);
+
+static gboolean     gimp_param_spec_file_validate  (GParamSpec               *pspec,
+                                                    GValue                   *value);
+static gint         gimp_param_spec_file_cmp       (GParamSpec               *pspec,
+                                                    const GValue             *value1,
+                                                    const GValue             *value2);
+static GParamSpec * gimp_param_spec_file_duplicate (GParamSpec               *pspec);
+
+
+/**
+ * gimp_param_file_get_type:
+ *
+ * Reveals the object type
+ *
+ * Returns: the #GType for a file param object.
+ *
+ * Since: 3.0
+ **/
+GType
+gimp_param_file_get_type (void)
+{
+  static GType type = 0;
+
+  if (! type)
+    {
+      const GTypeInfo info =
+      {
+        sizeof (GimpParamSpecObjectClass),
+        NULL, NULL,
+        (GClassInitFunc) gimp_param_file_class_init,
+        NULL, NULL,
+        sizeof (GimpParamSpecFile),
+        0,
+        (GInstanceInitFunc) gimp_param_file_init
+      };
+
+      type = g_type_register_static (GIMP_TYPE_PARAM_OBJECT,
+                                     "GimpParamFile", &info, 0);
+    }
+
+  return type;
+}
+
+static void
+gimp_param_file_class_init (GimpParamSpecObjectClass *klass)
+{
+  GParamSpecClass          *pclass = G_PARAM_SPEC_CLASS (klass);
+  GimpParamSpecObjectClass *oclass = GIMP_PARAM_SPEC_OBJECT_CLASS (klass);
+
+  pclass->value_type     = G_TYPE_FILE;
+  pclass->value_validate = gimp_param_spec_file_validate;
+  pclass->values_cmp     = gimp_param_spec_file_cmp;
+  oclass->duplicate      = gimp_param_spec_file_duplicate;
+}
+
+static void
+gimp_param_file_init (GimpParamSpecFile *fspec)
+{
+  fspec->none_ok = TRUE;
+  fspec->action  = GIMP_FILE_CHOOSER_ACTION_OPEN;
+}
+
+static gboolean
+gimp_param_spec_file_validate (GParamSpec *pspec,
+                               GValue     *value)
+{
+  GimpParamSpecFile   *fspec     = GIMP_PARAM_SPEC_FILE (pspec);
+  GimpParamSpecObject *ospec     = GIMP_PARAM_SPEC_OBJECT (pspec);
+  GFile               *file      = value->data[0].v_pointer;
+  gboolean             modifying = FALSE;
+
+  if (file == NULL && ! fspec->none_ok && ospec->_default_value != NULL)
+    {
+      modifying = TRUE;
+    }
+  else if (file != NULL && g_file_is_native (file))
+    {
+      gboolean  exists = g_file_query_exists (file, NULL);
+      GFileType type   = g_file_query_file_type (file, G_FILE_QUERY_INFO_NONE, NULL);
+
+      switch (fspec->action)
+        {
+        case GIMP_FILE_CHOOSER_ACTION_OPEN:
+          modifying = (! exists || type != G_FILE_TYPE_REGULAR);
+          break;
+        case GIMP_FILE_CHOOSER_ACTION_SAVE:
+          modifying = (exists && type != G_FILE_TYPE_REGULAR);
+          break;
+        case GIMP_FILE_CHOOSER_ACTION_SELECT_FOLDER:
+          modifying = (! exists || type != G_FILE_TYPE_DIRECTORY);
+          break;
+        case GIMP_FILE_CHOOSER_ACTION_CREATE_FOLDER:
+          modifying = (exists && type != G_FILE_TYPE_DIRECTORY);
+          break;
+        case GIMP_FILE_CHOOSER_ACTION_ANY:
+          break;
+        }
+    }
+
+  if (modifying)
+    {
+      g_clear_object (&file);
+      value->data[0].v_pointer = ospec->_default_value ? g_object_ref (ospec->_default_value) : NULL;
+    }
+
+  return modifying;
+}
+
+static gint
+gimp_param_spec_file_cmp (GParamSpec   *pspec,
+                          const GValue *value1,
+                          const GValue *value2)
+{
+  GFile *file1 = g_value_get_object (value1);
+  GFile *file2 = g_value_get_object (value2);
+  gchar *uri1;
+  gchar *uri2;
+  gint   retval;
+
+  if (! file1 || ! file2)
+    return file2 ? -1 : (file1 ? 1 : 0);
+
+  uri1 = g_file_get_uri (file1);
+  uri2 = g_file_get_uri (file2);
+
+  retval = g_strcmp0 (uri1, uri2);
+
+  g_free (uri1);
+  g_free (uri2);
+
+  return retval;
+}
+
+static GParamSpec *
+gimp_param_spec_file_duplicate (GParamSpec *pspec)
+{
+  GimpParamSpecObject *ospec;
+  GimpParamSpecFile   *fspec;
+  GParamSpec          *duplicate;
+
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_FILE (pspec), NULL);
+
+  ospec     = GIMP_PARAM_SPEC_OBJECT (pspec);
+  fspec     = GIMP_PARAM_SPEC_FILE (pspec);
+  duplicate = gimp_param_spec_file (pspec->name,
+                                    g_param_spec_get_nick (pspec),
+                                    g_param_spec_get_blurb (pspec),
+                                    fspec->action, fspec->none_ok,
+                                    G_FILE (ospec->_default_value),
+                                    pspec->flags);
+  return duplicate;
+}
+
+/**
+ * gimp_param_spec_file:
+ * @name:          Canonical name of the param
+ * @nick:          Nickname of the param
+ * @blurb:         Brief description of param.
+ * @action:        The type of file to expect.
+ * @none_ok:       Whether %NULL is allowed.
+ * @default_value: (nullable): File to use if none is assigned.
+ * @flags:         a combination of #GParamFlags
+ *
+ * Creates a param spec to hold a file param.
+ * See g_param_spec_internal() for more information.
+ *
+ * Returns: (transfer full): a newly allocated #GParamSpec instance
+ *
+ * Since: 3.0
+ **/
+GParamSpec *
+gimp_param_spec_file (const gchar           *name,
+                      const gchar           *nick,
+                      const gchar           *blurb,
+                      GimpFileChooserAction  action,
+                      gboolean               none_ok,
+                      GFile                 *default_value,
+                      GParamFlags            flags)
+{
+  GimpParamSpecFile   *fspec;
+  GimpParamSpecObject *ospec;
+
+  g_return_val_if_fail (default_value == NULL || G_IS_FILE (default_value), NULL);
+
+  fspec = g_param_spec_internal (GIMP_TYPE_PARAM_FILE,
+                                 name, nick, blurb, flags);
+
+  g_return_val_if_fail (fspec, NULL);
+
+  fspec->action         = action;
+  fspec->none_ok        = none_ok;
+
+  ospec                 = GIMP_PARAM_SPEC_OBJECT (fspec);
+  ospec->_has_default   = TRUE;
+  /* Note that we don't check none_ok and allows even NULL as default
+   * value. What we won't allow will be trying to set a NULL value
+   * later.
+   */
+  ospec->_default_value = default_value ? g_object_ref (G_OBJECT (default_value)) : NULL;
+
+  return G_PARAM_SPEC (fspec);
+}
+
+/**
+ * gimp_param_spec_file_get_action:
+ * @pspec: a #GParamSpec to hold a #GFile value.
+ *
+ * Returns: the file action tied to @pspec.
+ *
+ * Since: 3.0
+ **/
+GimpFileChooserAction
+gimp_param_spec_file_get_action (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_FILE (pspec), GIMP_FILE_CHOOSER_ACTION_ANY);
+
+  return GIMP_PARAM_SPEC_FILE (pspec)->action;
+}
+
+/**
+ * gimp_param_spec_file_set_action:
+ * @pspec:  a #GParamSpec to hold a #GFile value.
+ * @action: new action for @pspec.
+ *
+ * Change the file action tied to @pspec.
+ *
+ * Since: 3.0
+ **/
+void
+gimp_param_spec_file_set_action (GParamSpec            *pspec,
+                                 GimpFileChooserAction  action)
+{
+  g_return_if_fail (GIMP_IS_PARAM_SPEC_FILE (pspec));
+
+  GIMP_PARAM_SPEC_FILE (pspec)->action = action;
+}
+
+/**
+ * gimp_param_spec_file_none_allowed:
+ * @pspec: a #GParamSpec to hold a #GFile value.
+ *
+ * Returns: %TRUE if a %NULL value is allowed.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_param_spec_file_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_FILE (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_FILE (pspec)->none_ok;
+}
+
+/*
  * GIMP_TYPE_ARRAY
  */
 
@@ -1069,6 +1341,17 @@ gimp_core_object_array_copy (GimpCoreObjectArray array)
  * GIMP_TYPE_PARAM_CORE_OBJECT_ARRAY
  */
 
+#define GIMP_PARAM_SPEC_CORE_OBJECT_ARRAY(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_CORE_OBJECT_ARRAY, GimpParamSpecCoreObjectArray))
+
+typedef struct _GimpParamSpecCoreObjectArray GimpParamSpecCoreObjectArray;
+
+struct _GimpParamSpecCoreObjectArray
+{
+  GParamSpecBoxed parent_instance;
+
+  GType           object_type;
+};
+
 static void       gimp_param_core_object_array_class_init  (GParamSpecClass *klass);
 static void       gimp_param_core_object_array_init        (GParamSpec      *pspec);
 static gboolean   gimp_param_core_object_array_validate    (GParamSpec      *pspec,
@@ -1208,4 +1491,20 @@ gimp_param_spec_core_object_array (const gchar *name,
   array_spec->object_type = object_type;
 
   return G_PARAM_SPEC (array_spec);
+}
+
+/**
+ * gimp_param_spec_core_object_array_get_object_type:
+ * @pspec: a #GParamSpec to hold a #GimpParamSpecCoreObjectArray value.
+ *
+ * Returns: the type for objects in the object array.
+ *
+ * Since: 3.0
+ **/
+GType
+gimp_param_spec_core_object_array_get_object_type (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_CORE_OBJECT_ARRAY (pspec), G_TYPE_NONE);
+
+  return GIMP_PARAM_SPEC_CORE_OBJECT_ARRAY (pspec)->object_type;
 }

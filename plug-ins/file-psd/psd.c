@@ -213,11 +213,13 @@ psd_create_procedure (GimpPlugIn  *plug_in,
       gimp_procedure_set_image_types (procedure, "*");
 
       gimp_procedure_set_menu_label (procedure, _("Photoshop image"));
+      gimp_file_procedure_set_format_name (GIMP_FILE_PROCEDURE (procedure),
+                                           _("Photoshop image"));
 
       gimp_procedure_set_documentation (procedure,
                                         _("Saves files in the Photoshop (TM) "
                                           "PSD file format"),
-                                        _("This filter saves files of Adobe "
+                                        _("This plug-in saves files of Adobe "
                                           "Photoshop (TM) native PSD format. "
                                           "These files may be of any image type "
                                           "supported by GIMP, with or without "
@@ -276,6 +278,12 @@ psd_create_procedure (GimpPlugIn  *plug_in,
                                            "was attached to the image when originally imported."),
                                            FALSE,
                                            G_PARAM_READWRITE);
+
+      gimp_export_procedure_set_support_exif      (GIMP_EXPORT_PROCEDURE (procedure), TRUE);
+      gimp_export_procedure_set_support_iptc      (GIMP_EXPORT_PROCEDURE (procedure), TRUE);
+      gimp_export_procedure_set_support_xmp       (GIMP_EXPORT_PROCEDURE (procedure), TRUE);
+      gimp_export_procedure_set_support_profile   (GIMP_EXPORT_PROCEDURE (procedure), TRUE);
+      gimp_export_procedure_set_support_thumbnail (GIMP_EXPORT_PROCEDURE (procedure), TRUE);
     }
   else if (! strcmp (name, LOAD_METADATA_PROC))
     {

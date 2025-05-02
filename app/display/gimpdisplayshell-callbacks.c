@@ -574,16 +574,16 @@ gimp_display_shell_canvas_draw_image (GimpDisplayShell *shell,
     {
       gint i;
 
-      if (! shell->show_all)
-        {
-          cairo_save (cr);
-          gimp_display_shell_draw_checkerboard (shell, cr);
-          cairo_restore (cr);
-        }
-
       if (shell->show_image)
         {
           cairo_set_matrix (cr, &matrix);
+
+          if (! shell->show_all)
+            {
+              cairo_save (cr);
+              gimp_display_shell_draw_checkerboard (shell, cr);
+              cairo_restore (cr);
+            }
 
           for (i = 0; i < clip_rectangles->num_rectangles; i++)
             {

@@ -117,12 +117,12 @@ static const struct
 }
 metadata_properties[] =
 {
-  { "save-exif",          GIMP_METADATA_SAVE_EXIF          },
-  { "save-xmp",           GIMP_METADATA_SAVE_XMP           },
-  { "save-iptc",          GIMP_METADATA_SAVE_IPTC          },
-  { "save-thumbnail",     GIMP_METADATA_SAVE_THUMBNAIL     },
-  { "save-color-profile", GIMP_METADATA_SAVE_COLOR_PROFILE },
-  { "save-comment",       GIMP_METADATA_SAVE_COMMENT       }
+  { "include-exif",          GIMP_METADATA_SAVE_EXIF          },
+  { "include-xmp",           GIMP_METADATA_SAVE_XMP           },
+  { "include-iptc",          GIMP_METADATA_SAVE_IPTC          },
+  { "include-thumbnail",     GIMP_METADATA_SAVE_THUMBNAIL     },
+  { "include-color-profile", GIMP_METADATA_SAVE_COLOR_PROFILE },
+  { "include-comment",       GIMP_METADATA_SAVE_COMMENT       }
 };
 
 
@@ -450,7 +450,7 @@ gimp_procedure_config_save_metadata (GimpProcedureConfig *config,
 /**
  * gimp_procedure_config_get_core_object_array:
  * @config:        a #GimpProcedureConfig
- * @property_name: the name of a [struct@ParamSpecCoreObjectArray] param spec.
+ * @property_name: the name of a #GimpParamSpecCoreObjectArray param spec.
  *
  * A function for bindings to get a [type@CoreObjectArray] property. Getting
  * these with [method@GObject.Object.get] or [method@GObject.Object.get_property] won't
@@ -501,7 +501,7 @@ gimp_procedure_config_get_core_object_array (GimpProcedureConfig  *config,
 /**
  * gimp_procedure_config_set_core_object_array:
  * @config:        a #GimpProcedureConfig
- * @property_name: the name of a [struct@ParamSpecCoreObjectArray] param spec.
+ * @property_name: the name of a #GimpParamSpecCoreObjectArray param spec.
  * @objects: (array length=n_objects) (transfer none): an array of #GObjects.
  * @n_objects: the numbers of @objects.
  *
@@ -560,7 +560,7 @@ gimp_procedure_config_set_core_object_array (GimpProcedureConfig  *config,
 /**
  * gimp_procedure_config_get_color_array:
  * @config:        a #GimpProcedureConfig
- * @property_name: the name of a [struct@ParamSpecCoreObjectArray] param spec.
+ * @property_name: the name of a #GParamSpecBoxed param spec with [type@ColorArray] value type.
  *
  * A function for bindings to get a [type@ColorArray] property. Getting
  * these with [method@GObject.Object.get] or [method@GObject.Object.get_property] won't
@@ -612,7 +612,7 @@ gimp_procedure_config_get_color_array (GimpProcedureConfig  *config,
 /**
  * gimp_procedure_config_set_color_array:
  * @config:        a #GimpProcedureConfig
- * @property_name: the name of a [struct@ParamSpecCoreObjectArray] param spec.
+ * @property_name: the name of a #GParamSpecBoxed param spec with [type@ColorArray] value type.
  * @colors: (array length=n_colors) (transfer none): an array of [class@Gegl.Color].
  * @n_colors: the numbers of @colors.
  *
@@ -671,11 +671,11 @@ gimp_procedure_config_set_color_array (GimpProcedureConfig  *config,
 /**
  * gimp_procedure_config_get_choice_id:
  * @config:        a #GimpProcedureConfig
- * @property_name: the name of a [struct@ParamSpecChoice] property.
+ * @property_name: the name of a #GimpParamSpecChoice property.
  *
  * A utility function which will get the current string value of a
- * [struct@ParamSpecChoice] property in @config and convert it to the integer ID
- * mapped to this value.
+ * #GimpParamSpecChoice property in @config and convert it to the
+ * integer ID mapped to this value.
  * This makes it easy to work with an Enum type locally, within a plug-in code.
  *
  * Since: 3.0
@@ -684,10 +684,10 @@ gint
 gimp_procedure_config_get_choice_id (GimpProcedureConfig *config,
                                      const gchar         *property_name)
 {
-  GParamSpec          *param_spec;
-  GimpParamSpecChoice *cspec;
-  gchar               *value = NULL;
-  gint                 id;
+  GParamSpec *param_spec;
+  GimpChoice *choice;
+  gchar      *value = NULL;
+  gint        id;
 
   param_spec = g_object_class_find_property (G_OBJECT_GET_CLASS (config),
                                              property_name);
@@ -711,11 +711,11 @@ gimp_procedure_config_get_choice_id (GimpProcedureConfig *config,
       return 0;
     }
 
-  cspec = GIMP_PARAM_SPEC_CHOICE (param_spec);
+  choice = gimp_param_spec_choice_get_choice (param_spec);
   g_object_get (config,
                 property_name, &value,
                 NULL);
-  id = gimp_choice_get_id (cspec->choice, value);
+  id = gimp_choice_get_id (choice, value);
 
   g_free (value);
 
@@ -1048,12 +1048,12 @@ _gimp_procedure_config_end_run (GimpProcedureConfig *config,
  * The following boolean arguments of the used [class@ExportProcedure] are
  * synced. The procedure can but must not provide these arguments.
  *
- * - "save-exif" for %GIMP_METADATA_SAVE_EXIF.
- * - "save-xmp" for %GIMP_METADATA_SAVE_XMP.
- * - "save-iptc" for %GIMP_METADATA_SAVE_IPTC.
- * - "save-thumbnail" for %GIMP_METADATA_SAVE_THUMBNAIL.
- * - "save-color-profile" for %GIMP_METADATA_SAVE_COLOR_PROFILE.
- * - "save-comment" for %GIMP_METADATA_SAVE_COMMENT.
+ * - "include-exif" for %GIMP_METADATA_SAVE_EXIF.
+ * - "include-xmp" for %GIMP_METADATA_SAVE_XMP.
+ * - "include-iptc" for %GIMP_METADATA_SAVE_IPTC.
+ * - "include-thumbnail" for %GIMP_METADATA_SAVE_THUMBNAIL.
+ * - "include-color-profile" for %GIMP_METADATA_SAVE_COLOR_PROFILE.
+ * - "include-comment" for %GIMP_METADATA_SAVE_COMMENT.
  *
  * The values from the [flags@MetadataSaveFlags] will only ever be used
  * to set these properties to %FALSE, overriding the user's saved

@@ -12,7 +12,7 @@
 
 
 ; get bounding box of intersection of selection mask with drawable
-; bounding box in x, y, width, heigth format
+; bounding box in x, y, width, height format
 (assert `(gimp-drawable-mask-bounds ,testDrawable))
 ; bounding box in upper left x,y lower right x,y
 (assert `(gimp-drawable-mask-intersect ,testDrawable))
@@ -36,28 +36,30 @@
 ;            1 ; push merge to undo stack
 ;          ))
 
+; TODO document that signature changed in v3
 (assert `(gimp-drawable-offset
             ,testDrawable
             1 ; wrap around or fill
             OFFSET-WRAP-AROUND ; OffsetType
+            "white"            ; color to fill background
             -2147483648 -2147483648 ; x, y
             ))
 
 
 
 ; thumbnails
+; Since 3.0 rc2 these are private to  libgimp
+;(assert `(gimp-drawable-thumbnail
+;            ,testDrawable
+;            1 1 ; thumbnail width height
+;          ))
 
-(assert `(gimp-drawable-thumbnail
-            ,testDrawable
-            1 1 ; thumbnail width height
-          ))
-
-(assert `(gimp-drawable-sub-thumbnail
-            ,testDrawable
-            1 1 ; origin
-            2 2 ; width, height
-            2 2 ; thumbnail width height
-          ))
+;(assert `(gimp-drawable-sub-thumbnail
+;            ,testDrawable
+;            1 1 ; origin
+;            2 2 ; width, height
+;            2 2 ; thumbnail width height
+;          ))
 
 
 ;gimp-drawable-extract-component is tested drawable-ops

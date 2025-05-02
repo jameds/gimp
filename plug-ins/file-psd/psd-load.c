@@ -600,8 +600,7 @@ read_header_block (PSDimage      *img_a,
 
   if (img_a->color_mode == PSD_CMYK || img_a->color_mode == PSD_LAB)
     {
-      if (img_a->bps != 8 &&
-         (img_a->bps != 16 || img_a->color_mode == PSD_LAB))
+      if (img_a->bps != 8 && img_a->bps != 16)
         {
           g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
                        _("Unsupported color mode: %s"),
@@ -1398,7 +1397,7 @@ read_layer_block (PSDimage      *img_a,
                 return NULL;
 
               cur_ofs = PSD_TELL(input);
-              if (img_a->mask_layer_start + block_len != cur_ofs)
+              if (img_a->mask_layer_start + block_len != cur_ofs && ! img_a->merged_image_only)
                 {
                   g_debug ("Unexpected offset after reading layer info: %" G_GOFFSET_FORMAT
                           " instead of %" G_GOFFSET_FORMAT,
@@ -1606,7 +1605,7 @@ create_gimp_image (PSDimage *img_a,
         break;
 
       case 16:
-        if (img_a->color_mode == PSD_CMYK)
+        if (img_a->color_mode == PSD_CMYK || img_a->color_mode == PSD_LAB)
           precision = GIMP_PRECISION_FLOAT_NON_LINEAR;
         else
           precision = GIMP_PRECISION_U16_NON_LINEAR;
@@ -1765,11 +1764,17 @@ psd_convert_lab_to_srgb (PSDimage *img_a,
                          gboolean  alpha)
 {
   const Babl *fish;
+  const Babl *base_format = NULL;
+
+  if (img_a->bps == 8)
+    base_format = babl_format (alpha ? "CIE Lab alpha u8" : "CIE Lab u8");
+  else
+    base_format = babl_format (alpha ? "CIE Lab alpha u16" : "CIE Lab u16");
 
   if (alpha)
-    fish = babl_fish ("CIE Lab alpha u8", "R'G'B'A float");
+    fish = babl_fish (base_format, "R'G'B'A float");
   else
-    fish = babl_fish ("CIE Lab u8", "R'G'B' float");
+    fish = babl_fish (base_format, "R'G'B' float");
 
   babl_process (fish, src, dst, width * height);
 
@@ -1961,10 +1966,17 @@ mark_clipping_groups (PSDimage  *img_a,
                                             clipping_group_stack->len - 1);
                       if (parent_info.group_index > -1)
                         {
+                          /* We can be nested multiple levels deep, in which
+                           * case the parent group is also without clipping.
+                           * (Issue 13642) */
+                          if (parent_info.last_index == -1)
+                            {
+                              IFDBG(4) g_debug ("[%d] No clipping group ending, going level up", lidx);
+                            }
                           /* Test if we were in a group that was the start of a
                            * clipping group, but is itself not clipping!
                            * (example image layers 96-27) */
-                          if (lyr_a[parent_info.last_index]->clipping == 0)
+                          else if (lyr_a[parent_info.last_index]->clipping == 0)
                             {
                               /* found the bottom of the clipping group */
                               lyr_a[lidx]->clipping_group_type = 1; /* start clipping group */
@@ -2811,7 +2823,6 @@ add_merged_image (GimpImage     *image,
   gint                  i;
   gboolean              alpha_visible;
   gboolean              alpha_channel = FALSE;
-  gboolean              original_mode_CMYK = FALSE;
   GeglBuffer           *buffer;
   GimpImageType         image_type;
   GeglColor            *alpha_rgb;
@@ -2841,19 +2852,6 @@ add_merged_image (GimpImage     *image,
             total_channels > 4)
     {
       extra_channels = total_channels - 4;
-    }
-
-  if (img_a->merged_image_only &&
-      img_a->color_mode == PSD_CMYK &&
-      img_a->num_layers > 0)
-    {
-      /* In this case there is no conversion. Merged image is RGB. */
-      img_a->color_mode = PSD_RGB;
-      original_mode_CMYK = TRUE;
-      if (! img_a->transparency)
-        {
-          total_channels--;
-        }
     }
 
   if (extra_channels > 0)
@@ -3022,37 +3020,6 @@ add_merged_image (GimpImage     *image,
                                    dst0, pixels,
                                    img_a->columns, img_a->rows,
                                    img_a->transparency || alpha_channel);
-          g_free (pixels);
-          pixels = dst0;
-        }
-      else if (original_mode_CMYK && img_a->transparency)
-        {
-          gint    irow;
-          guchar *dst0, *dst;
-          guchar *data;
-
-          dst0 = g_malloc (base_channels * layer_size * sizeof(guchar));
-          dst  = dst0;
-          data = pixels;
-
-          /* CMYKA layers: 5 channels but merged image is RGBA
-           * with RGB in the first 3 layers and A in 5th layer.
-           * Move A to 4th layer. */
-          for (irow = 0; irow < img_a->rows; irow++)
-            {
-              gint icol;
-
-              for (icol = 0; icol < img_a->columns; icol++)
-                {
-                  dst[0] = data[0];
-                  dst[1] = data[1];
-                  dst[2] = data[2];
-                  dst[3] = data[4];
-
-                  dst  += 4;
-                  data += 5;
-                }
-            }
           g_free (pixels);
           pixels = dst0;
         }
@@ -3684,7 +3651,8 @@ get_layer_format (PSDimage *img_a,
           break;
 
         case 16:
-          format = babl_format (img_a->color_mode == PSD_CMYK ? "R'G'B' float" : "R'G'B' u16");
+          format = babl_format ((img_a->color_mode == PSD_CMYK || img_a->color_mode == PSD_LAB) ?
+                                "R'G'B' float" : "R'G'B' u16");
           break;
 
         case 8:
@@ -3707,7 +3675,8 @@ get_layer_format (PSDimage *img_a,
           break;
 
         case 16:
-          format = babl_format (img_a->color_mode == PSD_CMYK ? "R'G'B'A float" : "R'G'B'A u16");
+          format = babl_format ((img_a->color_mode == PSD_CMYK || img_a->color_mode == PSD_LAB) ?
+                                "R'G'B'A float" : "R'G'B'A u16");
           break;
 
         case 8:
@@ -3933,6 +3902,7 @@ load_dialog (const gchar *title,
       gtk_label_set_markup (GTK_LABEL (label), message);
       gtk_label_set_justify (GTK_LABEL (label), GTK_JUSTIFY_LEFT);
       gtk_label_set_line_wrap (GTK_LABEL (label), TRUE);
+      gtk_label_set_selectable (GTK_LABEL (label), TRUE);
       gtk_label_set_yalign (GTK_LABEL (label), 0.0);
       gtk_container_add (GTK_CONTAINER (scrolled_window), label);
       gtk_widget_show (label);

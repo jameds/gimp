@@ -25,12 +25,14 @@
 #include <gegl.h>
 #include <gtk/gtk.h>
 
+#include "libgimpbase/gimpbase.h"
 #include "libgimpmath/gimpmath.h"
 #include "libgimpwidgets/gimpwidgets.h"
 #include "libgimpwidgets/gimpwidgets-private.h"
 
 #include "gimphelp-ids.h"
 #include "widgets-types.h"
+#include "tools/tools-types.h"
 
 #include "actions/gimpgeglprocedure.h"
 #include "actions/filters-commands.h"
@@ -55,6 +57,8 @@
 #include "core/gimptoolinfo.h"
 #include "core/gimptreehandler.h"
 #include "core/gimpundostack.h"
+
+#include "tools/tool_manager.h"
 
 #include "vectors/gimppath.h"
 
@@ -1881,17 +1885,20 @@ gimp_item_tree_view_drop_viewables (GimpContainerTreeView   *tree_view,
 {
   GimpItemTreeViewClass *item_view_class;
   GimpItemTreeView      *item_view              = GIMP_ITEM_TREE_VIEW (tree_view);
+  GList                 *dropped_viewables;
+  GList                 *dup_children           = NULL;
   GList                 *iter;
   GimpImage             *src_image              = NULL;
   GType                  src_viewable_type      = G_TYPE_NONE;
   gint                   dest_index             = -1;
-  gboolean               src_viewables_reversed = FALSE;
 
   g_return_if_fail (g_list_length (src_viewables) > 0);
 
+  dropped_viewables = g_list_copy (src_viewables);
+
   item_view_class = GIMP_ITEM_TREE_VIEW_GET_CLASS (item_view);
 
-  for (iter = src_viewables; iter; iter = iter->next)
+  for (iter = dropped_viewables; iter; iter = iter->next)
     {
       GimpViewable *src_viewable = iter->data;
 
@@ -1899,7 +1906,9 @@ gimp_item_tree_view_drop_viewables (GimpContainerTreeView   *tree_view,
        * from the same source image.
        */
       if (src_viewable_type == G_TYPE_NONE)
-        src_viewable_type = G_TYPE_FROM_INSTANCE (src_viewable);
+        {
+          src_viewable_type = G_TYPE_FROM_INSTANCE (src_viewable);
+        }
       else
         {
           if (g_type_is_a (src_viewable_type,
@@ -1920,29 +1929,53 @@ gimp_item_tree_view_drop_viewables (GimpContainerTreeView   *tree_view,
         g_return_if_fail (src_image == gimp_item_get_image (GIMP_ITEM (iter->data)));
     }
 
+  /* What does it mean when an item and a children of this item are
+   * dropped together? Does it mean we want to copy the tree structure
+   * but only this child? What when it's not a copy but a move?
+   * These are complicated questions for UX discussions. For the time
+   * being, we just do the simple answer: all children of a group item
+   * are implied, so we can just remove any descendant from the list of
+   * viewables.
+   */
+  for (iter = dropped_viewables; iter; iter = iter->next)
+    {
+      GList *iter2;
+
+      for (iter2 = dropped_viewables; iter2; iter2 = iter2->next)
+        {
+          if (iter->data != iter2->data &&
+              gimp_viewable_is_ancestor (iter2->data, iter->data))
+            {
+              dup_children = g_list_prepend (dup_children, iter->data);
+              break;
+            }
+        }
+    }
+  for (iter = dup_children; iter; iter = iter->next)
+    dropped_viewables = g_list_remove (dropped_viewables, iter->data);
+  g_list_free (dup_children);
+
   if (drop_pos == GTK_TREE_VIEW_DROP_AFTER ||
       (drop_pos == GTK_TREE_VIEW_DROP_INTO_OR_AFTER &&
        dest_viewable                                &&
        gimp_viewable_get_children (dest_viewable)))
     {
-      src_viewables_reversed = TRUE;
-      src_viewables = g_list_reverse (src_viewables);
+      dropped_viewables = g_list_reverse (dropped_viewables);
     }
 
   if (item_view->priv->image != src_image ||
       ! g_type_is_a (src_viewable_type, item_view_class->item_type))
     {
-      GType item_type = item_view_class->item_type;
-
       gimp_image_undo_group_start (item_view->priv->image,
                                    GIMP_UNDO_GROUP_LAYER_ADD,
                                    _("Drop layers"));
 
-      for (iter = src_viewables; iter; iter = iter->next)
+      for (iter = dropped_viewables; iter; iter = iter->next)
         {
           GimpViewable *src_viewable = iter->data;
           GimpItem     *new_item;
           GimpItem     *parent;
+          GType         item_type    = item_view_class->item_type;
 
           if (g_type_is_a (src_viewable_type, item_type))
             item_type = G_TYPE_FROM_INSTANCE (src_viewable);
@@ -1962,9 +1995,9 @@ gimp_item_tree_view_drop_viewables (GimpContainerTreeView   *tree_view,
     {
       gimp_image_undo_group_start (item_view->priv->image,
                                    GIMP_UNDO_GROUP_IMAGE_ITEM_REORDER,
-                                   GIMP_ITEM_GET_CLASS (src_viewables->data)->reorder_desc);
+                                   GIMP_ITEM_GET_CLASS (dropped_viewables->data)->reorder_desc);
 
-      for (iter = src_viewables; iter; iter = iter->next)
+      for (iter = dropped_viewables; iter; iter = iter->next)
         {
           GimpViewable *src_viewable = iter->data;
           GimpItem     *src_parent;
@@ -1993,17 +2026,10 @@ gimp_item_tree_view_drop_viewables (GimpContainerTreeView   *tree_view,
         }
     }
 
-  if (src_viewables_reversed)
-    /* The caller keeps a copy to src_viewables to free it. If we
-     * reverse it, the pointer stays valid yet ends up pointing to the
-     * now last (previously first) element of the list. So we leak the
-     * whole list but this element. Let's reverse back the list to have
-     * next and prev pointers same as call time.
-     */
-    src_viewables = g_list_reverse (src_viewables);
-
   gimp_image_undo_group_end (item_view->priv->image);
   gimp_image_flush (item_view->priv->image);
+
+  g_list_free (dropped_viewables);
 }
 
 
@@ -2357,6 +2383,7 @@ gimp_item_tree_view_effects_clicked (GtkCellRendererToggle *toggle,
           GtkTreeViewColumn     *column;
           GimpContainerTreeView *filter_tree_view = NULL;
           GtkWidget             *scrolled_window  = NULL;
+          gboolean               is_editing       = FALSE;
 
           filter_view = gimp_container_tree_view_new (filters,
                                                       gimp_container_view_get_context (GIMP_CONTAINER_VIEW (view)),
@@ -2402,8 +2429,18 @@ gimp_item_tree_view_effects_clicked (GtkCellRendererToggle *toggle,
                filter_list = g_list_previous (filter_list))
             {
               if (GIMP_IS_DRAWABLE_FILTER (filter_list->data))
-                gimp_item_tree_view_filter_active_changed (GIMP_FILTER (filter_list->data),
-                                                           filter_tree_view);
+                {
+                  gboolean is_temporary;
+
+                  gimp_item_tree_view_filter_active_changed (GIMP_FILTER (filter_list->data),
+                                                             filter_tree_view);
+
+                  g_object_get (filter_list->data,
+                                "temporary", &is_temporary,
+                                NULL);
+                  if (is_temporary)
+                    is_editing = TRUE;
+                }
             }
 
           g_signal_connect (filter_tree_view, "select-items",
@@ -2433,6 +2470,9 @@ gimp_item_tree_view_effects_clicked (GtkCellRendererToggle *toggle,
 
           gimp_item_tree_view_filters_changed (item, view);
           gtk_widget_show (view->priv->effects_popover);
+
+          /* Lock filter options if we're actively editing a filter */
+          gimp_item_tree_effects_set_sensitive (view, ! is_editing);
         }
     }
 }
@@ -2449,35 +2489,45 @@ gimp_item_tree_view_effects_filters_selected (GimpContainerView  *view,
       item_view->priv->effects_drawable &&
       GIMP_IS_DRAWABLE (item_view->priv->effects_drawable))
     {
-      GimpDrawableFilter *filter = filters->data;
+      GimpDrawableFilter *filter;
       GimpContainer      *container;
-      gint                index;
-      gint                n_children;
-      gboolean            is_tool_op = FALSE;
-      GeglNode           *op_node    = NULL;
+      gint                index         = -1;
+      gint                n_children    = 0;
+      gboolean            is_blocked_op = FALSE;
+      GeglNode           *op_node       = NULL;
 
-      item_view->priv->effects_filter = filter;
+      /* Don't set floating selection as active filter */
+      if (GIMP_IS_DRAWABLE_FILTER (filters->data))
+        {
+          filter = filters->data;
 
-      container =
-        gimp_drawable_get_filters (GIMP_DRAWABLE (item_view->priv->effects_drawable));
+          item_view->priv->effects_filter = filter;
 
-      index = gimp_container_get_child_index (container,
-                                              GIMP_OBJECT (filter));
+          container =
+            gimp_drawable_get_filters (GIMP_DRAWABLE (item_view->priv->effects_drawable));
 
-      n_children = gimp_container_get_n_children (container);
+          index = gimp_container_get_child_index (container,
+                                                  GIMP_OBJECT (filter));
 
-      /* TODO: For now, prevent raising/lowering tool operations like Warp. */
-      op_node = gimp_drawable_filter_get_operation (filter);
-      if (op_node &&
-          ! strcmp (gegl_node_get_operation (op_node), "GraphNode"))
-        is_tool_op = TRUE;
+          n_children = gimp_container_get_n_children (container);
+
+          /* TODO: For now, prevent raising/lowering tool operations like Warp. */
+          op_node = gimp_drawable_filter_get_operation (filter);
+          if (op_node &&
+              ! strcmp (gegl_node_get_operation (op_node), "GraphNode"))
+            is_blocked_op = TRUE;
+        }
+      else
+        {
+          is_blocked_op = TRUE;
+        }
 
       gtk_widget_set_sensitive (item_view->priv->effects_remove_button,
-                                ! is_tool_op);
+                                ! is_blocked_op);
       gtk_widget_set_sensitive (item_view->priv->effects_raise_button,
-                                (index != 0) && ! is_tool_op);
+                                (index != 0) && ! is_blocked_op);
       gtk_widget_set_sensitive (item_view->priv->effects_lower_button,
-                                (index != n_children - 1) && ! is_tool_op);
+                                (index != n_children - 1) && ! is_blocked_op);
     }
 
   return TRUE;
@@ -2753,6 +2803,11 @@ gimp_item_tree_view_effects_lowered_clicked (GtkWidget        *widget,
 
       if (index < gimp_container_get_n_children (filters))
         {
+          /* Don't rearrange filters with floating selection */
+          if (! GIMP_IS_DRAWABLE_FILTER (
+                  gimp_container_get_child_by_index (filters, index)))
+            return;
+
           gimp_image_undo_push_filter_reorder (image, _("Reorder filter"),
                                                drawable,
                                                view->priv->effects_filter);
@@ -2787,7 +2842,7 @@ gimp_item_tree_view_effects_merged_clicked (GtkWidget        *widget,
       ! GIMP_IS_DRAWABLE_FILTER (view->priv->effects_filter))
     return;
 
-  /* Don't merge if certain tools with active filters are in use */
+  /* Commit GEGL-based tools before trying to merge filters */
   context     = gimp_container_view_get_context (GIMP_CONTAINER_VIEW (view));
   active_tool = gimp_context_get_tool (context);
 
@@ -2795,45 +2850,37 @@ gimp_item_tree_view_effects_merged_clicked (GtkWidget        *widget,
       ! strcmp (gimp_object_get_name (active_tool), "gimp-gradient-tool") ||
       ! strcmp (gimp_object_get_name (active_tool), "gimp-warp-tool"))
     {
-      view->priv->effects_filter = NULL;
-      gimp_message_literal (view->priv->image->gimp, G_OBJECT (view),
-                            GIMP_MESSAGE_ERROR,
-                            _("Effects from active tools can not be merged."));
-
-      return;
+      tool_manager_control_active (context->gimp, GIMP_TOOL_ACTION_COMMIT,
+                                   gimp_context_get_display (context));
     }
 
   if (view->priv->effects_drawable &&
       ! gimp_viewable_get_children (GIMP_VIEWABLE (view->priv->effects_drawable)))
     {
       GimpImage *image = view->priv->image;
-      GeglNode  *op    = gimp_drawable_filter_get_operation (view->priv->effects_filter);
 
       /* Don't merge if the layer is currently locked */
       if (gimp_item_get_lock_content (GIMP_ITEM (view->priv->effects_drawable)))
         {
-          gimp_message_literal (view->priv->image->gimp, G_OBJECT (view),
+          gimp_message_literal (image->gimp, G_OBJECT (view),
                                 GIMP_MESSAGE_WARNING,
                                 _("The layer to merge down to is locked."));
           return;
         }
 
-      if (op)
-        {
-          gimp_drawable_merge_filters (GIMP_DRAWABLE (view->priv->effects_drawable));
-          gimp_drawable_clear_filters (GIMP_DRAWABLE (view->priv->effects_drawable));
+      gimp_drawable_merge_filters (GIMP_DRAWABLE (view->priv->effects_drawable));
+      gimp_drawable_clear_filters (GIMP_DRAWABLE (view->priv->effects_drawable));
 
-          view->priv->effects_filter = NULL;
+      view->priv->effects_filter = NULL;
 
-          /* Close NDE pop-over on successful merge */
-          gtk_widget_set_visible (view->priv->effects_popover, FALSE);
+      /* Close NDE pop-over on successful merge */
+      gtk_widget_set_visible (view->priv->effects_popover, FALSE);
 
-          /* Hack to make the effects visibly change */
-          gimp_item_set_visible (GIMP_ITEM (view->priv->effects_drawable), FALSE, FALSE);
-          gimp_image_flush (image);
-          gimp_item_set_visible (GIMP_ITEM (view->priv->effects_drawable), TRUE, FALSE);
-          gimp_image_flush (image);
-        }
+      /* Hack to make the effects visibly change */
+      gimp_item_set_visible (GIMP_ITEM (view->priv->effects_drawable), FALSE, FALSE);
+      gimp_image_flush (image);
+      gimp_item_set_visible (GIMP_ITEM (view->priv->effects_drawable), TRUE, FALSE);
+      gimp_image_flush (image);
     }
 }
 
@@ -2956,6 +3003,7 @@ gimp_item_tree_view_filters_changed (GimpItem         *item,
   GList                 *filter_list    = NULL;
   gint                   n_filters      = 0;
   gboolean               fs_disabled    = FALSE;
+  gboolean               temporary_only = TRUE;
 
   iter = gimp_container_view_lookup (container_view,
                                      (GimpViewable *) item);
@@ -2969,11 +3017,25 @@ gimp_item_tree_view_filters_changed (GimpItem         *item,
            filter_list = g_list_previous (filter_list))
         {
           if (GIMP_IS_DRAWABLE_FILTER (filter_list->data))
-            n_filters++;
+            {
+              n_filters++;
+
+              if (temporary_only)
+                g_object_get (filter_list->data,
+                              "temporary", &temporary_only,
+                              NULL);
+            }
           else
-            fs_disabled = TRUE;
+            {
+              fs_disabled = TRUE;
+            }
         }
     }
+
+  /* Don't show icon if we only have a temporary filter
+   * like a tool-based filter */
+  if (temporary_only)
+    n_filters = 0;
 
   if (n_filters == 0 || fs_disabled)
     view->priv->effects_filter = NULL;

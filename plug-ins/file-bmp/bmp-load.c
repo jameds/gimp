@@ -66,10 +66,8 @@ struct Fileinfo
   gint          width;
   gint          height;
   guchar       *rowbuf;
-  guint64       rowbytes;
+  guint64       bytes_per_row;
   gint          bpp;
-  guchar       *dest;
-  gsize         rowstride;
   gint          channels;
   gint          bytesperchannel;
   gint          ncolors;
@@ -94,15 +92,15 @@ static GimpImage * ReadImage     (struct Fileinfo  *fi,
                                   GError          **error);
 
 static gint        load_rgb_64   (struct Fileinfo  *fi,
-                                  gsize             offset);
+                                  guchar           *dest);
 static gint        load_rgb      (struct Fileinfo  *fi,
-                                  gsize             offset);
+                                  guchar           *dest);
 static gint        load_indexed  (struct Fileinfo  *fi,
-                                  gsize             offset);
+                                  guchar           *dest);
 static gint        load_rle      (struct Fileinfo  *fi,
-                                  gsize             offset);
+                                  guchar           *dest);
 static gint        load_huffman  (struct Fileinfo  *fi,
-                                  gsize             offset);
+                                  guchar           *dest);
 
 static gint        huff_decode   (guint32           *bitbuf,
                                   gint              *buflen,
@@ -125,33 +123,6 @@ static gint        huff_find_eol (guint32           *bitbuf,
 static gint        huff_skip_eol (guint32           *bitbuf,
                                   gint              *buflen,
                                   FILE              *file);
-
-static void
-set_default_masks (gushort        biBitCnt,
-                   BitmapChannel *masks)
-{
-  switch (biBitCnt)
-    {
-    case 24:
-    case 32:
-      masks[0].mask = 0x00ff0000;
-      masks[1].mask = 0x0000ff00;
-      masks[2].mask = 0x000000ff;
-      masks[3].mask = 0x00000000;
-      break;
-
-    case 16:
-      /* 5 bits per channel */
-      masks[0].mask = 0x00007c00;
-      masks[1].mask = 0x000003e0;
-      masks[2].mask = 0x0000001f;
-      masks[3].mask = 0x00000000;
-      break;
-
-    default:
-      break;
-    }
-}
 
 static gint32
 ToL (const guchar *buffer)
@@ -199,7 +170,7 @@ read_colormap (FILE     *fd,
           return FALSE;
         }
 
-      /* Bitmap save the colors in another order! But change only once! */
+      /* BMP colormap entries are in BGR order */
 
       buffer[3 * i + 0] = rgb[2];
       buffer[3 * i + 1] = rgb[1];
@@ -209,6 +180,33 @@ read_colormap (FILE     *fd,
     }
 
   return TRUE;
+}
+
+static void
+set_default_masks (gushort        biBitCnt,
+                   BitmapChannel *masks)
+{
+  switch (biBitCnt)
+    {
+    case 24:
+    case 32:
+      masks[0].mask = 0x00ff0000;
+      masks[1].mask = 0x0000ff00;
+      masks[2].mask = 0x000000ff;
+      masks[3].mask = 0x00000000;
+      break;
+
+    case 16:
+      /* 5 bits per channel */
+      masks[0].mask = 0x00007c00;
+      masks[1].mask = 0x000003e0;
+      masks[2].mask = 0x0000001f;
+      masks[3].mask = 0x00000000;
+      break;
+
+    default:
+      break;
+    }
 }
 
 static void
@@ -230,23 +228,20 @@ digest_masks (BitmapChannel *masks)
 
   for (i = 0; i < 4; i++)
     {
-      guint32 mask;
-      gint    nbits, offset, bit;
+      guint32 mask   = masks[i].mask;
+      gint    nbits  = 0;
+      gint    offset = 0;
 
-      mask   = masks[i].mask;
-      nbits  = 0;
-      offset = -1;
-
-      for (bit = 0; bit < 32; bit++)
+      while (mask && ! (mask & 1))
         {
-          if (mask & 1)
-            {
-              nbits++;
-              if (offset == -1)
-                offset = bit;
-            }
+          mask >>= 1;
+          offset++;
+        }
 
-          mask = mask >> 1;
+      while (mask)
+        {
+          mask >>= 1;
+          nbits++;
         }
 
       masks[i].shiftin   = offset;
@@ -348,8 +343,6 @@ load_image (GFile *gfile, GError **error)
       goto out;
     }
 
-  /* What kind of bitmap is it? */
-
   /* OS/2 headers store width and height as unsigned, Windows headers as signed.
    * We make no attempt to distinguish between those (which would be possible
    * in some but not all cases) but always err on the Windows/signed side.
@@ -372,7 +365,7 @@ load_image (GFile *gfile, GError **error)
     }
   else if (bitmap_head.biSize >= 16)
     {
-      /* all others use 32bit ints and have 4-byte table entries */
+      /* all others use 32bit ints and have 4-byte color table entries */
       colorsize = 4;
 
       /* BITMAPINFOHEADER / OS22XBITMAPHEADER */
@@ -388,7 +381,10 @@ load_image (GFile *gfile, GError **error)
       bitmap_head.biClrImp  = ToL (&buffer[36]);
 
       /* OS22XBITMAPHEADER might write garbage into mask values, but
-       * they will be ignored because there is no OS/2 BITFIELDS bmp */
+       * they will be ignored because there is no OS/2 BITFIELDS bmp.
+       * Likewise for the following V4 fields, which would only be used
+       * when the header size is larger than any valid OS/2 header.
+       */
       bitmap_head.masks[0] = ToL (&buffer[40]);
       bitmap_head.masks[1] = ToL (&buffer[44]);
       bitmap_head.masks[2] = ToL (&buffer[48]);
@@ -442,10 +438,12 @@ load_image (GFile *gfile, GError **error)
     {
       if (bitmap_head.biCompr == BI_BITFIELDS && bitmap_head.biBitCnt == 1)
         {
+          /* BCA_HUFFMAN1D */
           bitmap_head.biCompr = BI_OS2_HUFFMAN;
         }
       else if (bitmap_head.biCompr == BI_JPEG && bitmap_head.biBitCnt == 24)
         {
+          /* BCA_RLE24 */
           bitmap_head.biCompr = BI_OS2_RLE24;
         }
     }
@@ -453,7 +451,7 @@ load_image (GFile *gfile, GError **error)
   if (bitmap_head.biSize <= 40 &&
       (bitmap_head.biCompr == BI_BITFIELDS || bitmap_head.biCompr == BI_ALPHABITFIELDS))
     {
-      /* BITMAPINFOHEADER stores masks right after header */
+      /* BITMAPINFOHEADER stores masks right after (not as part of) header */
 
       gint nmasks;
 
@@ -544,10 +542,12 @@ load_image (GFile *gfile, GError **error)
         case BI_BITFIELDS:
         case BI_ALPHABITFIELDS:
           read_masks (&bitmap_head.masks[0], fi.masks);
+          digest_masks (fi.masks);
           break;
 
         case BI_RGB:
           set_default_masks (bitmap_head.biBitCnt, fi.masks);
+          digest_masks (fi.masks);
           break;
 
         case BI_OS2_RLE24:
@@ -568,10 +568,18 @@ load_image (GFile *gfile, GError **error)
                        gimp_file_get_utf8_name (gfile));
           goto out;
         }
-      digest_masks (fi.masks);
       break;
 
     case 64:
+      if (bitmap_head.biCompr != BI_RGB)
+        {
+          g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                       _("Unsupported compression (%u) in BMP file from '%s'"),
+                       bitmap_head.biCompr > 100 ? bitmap_head.biCompr - 100
+                                                 : bitmap_head.biCompr,
+                       gimp_file_get_utf8_name (gfile));
+          goto out;
+        }
       break;
 
     default:
@@ -589,9 +597,9 @@ load_image (GFile *gfile, GError **error)
       goto out;
     }
 
-  fi.rowbytes = (((guint64) bitmap_head.biWidth * bitmap_head.biBitCnt + 31) / 32) * 4;
+  fi.bytes_per_row = (((guint64) bitmap_head.biWidth * bitmap_head.biBitCnt + 31) / 32) * 4;
 
-  if (fi.rowbytes > G_MAXSIZE || bitmap_head.biWidth > GIMP_MAX_IMAGE_SIZE ||
+  if (fi.bytes_per_row > G_MAXSIZE || bitmap_head.biWidth > GIMP_MAX_IMAGE_SIZE ||
       bitmap_head.biWidth < 1)
     {
       g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
@@ -601,7 +609,7 @@ load_image (GFile *gfile, GError **error)
     }
 
   if (bitmap_head.biHeight < G_MININT + 1 || /* +1 because |G_MININT| > G_MAXINT. */
-      bitmap_head.biHeight > GIMP_MAX_IMAGE_SIZE || bitmap_head.biHeight == 0)
+      ABS (bitmap_head.biHeight) > GIMP_MAX_IMAGE_SIZE || bitmap_head.biHeight == 0)
     {
       g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
                    _("Unsupported or invalid image height: %d"),
@@ -669,7 +677,9 @@ ReadImage (struct Fileinfo *fi,
   GimpImageType      image_type;
   GimpPrecision      precision_type = GIMP_PRECISION_U8_NON_LINEAR;
   const Babl        *format         = NULL;
+  guchar            *dest           = NULL;
   gsize              dest_size      = 0;
+  gsize              rowstride;
   gint               maxbits;
   gint               eof    = FALSE;
   enum Bmpformat     bmpfmt = 0;
@@ -704,7 +714,7 @@ ReadImage (struct Fileinfo *fi,
       for (i = 0, maxbits = 0; i < fi->channels; i++)
         maxbits = MAX (maxbits, fi->masks[i].nbits);
 
-      if (maxbits <= 8)
+      if (maxbits <= 8 || compression == BI_OS2_RLE24)
         {
           fi->bytesperchannel = 1;
           precision_type      = GIMP_PRECISION_U8_NON_LINEAR;
@@ -780,16 +790,16 @@ ReadImage (struct Fileinfo *fi,
   if ((guint64) fi->width * fi->tile_height < G_MAXSIZE / (fi->channels * fi->bytesperchannel))
     {
       dest_size  = (gsize) fi->width * fi->tile_height * fi->channels * fi->bytesperchannel;
-      fi->dest   = g_try_malloc0 (dest_size);
-      fi->rowbuf = g_try_malloc (MAX (4, fi->rowbytes));
+      dest       = g_try_malloc0 (dest_size);
+      fi->rowbuf = g_try_malloc (MAX (4, fi->bytes_per_row));
     }
 
-  if (! (fi->dest && fi->rowbuf))
+  if (! (dest && fi->rowbuf))
     {
       g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
                    _("Image dimensions too large: width %d x height %d"),
                    fi->width, fi->height);
-      g_free (fi->dest);
+      g_free (dest);
       g_free (fi->rowbuf);
       return NULL;
     }
@@ -803,7 +813,7 @@ ReadImage (struct Fileinfo *fi,
   gimp_image_insert_layer (image, layer, NULL, 0);
   buffer = gimp_drawable_get_buffer (GIMP_DRAWABLE (layer));
 
-  fi->rowstride = (gsize) fi->width * fi->channels;
+  rowstride = (gsize) fi->width * fi->channels * fi->bytesperchannel;
 
   cur_progress = 0;
   max_progress = fi->height;
@@ -813,40 +823,37 @@ ReadImage (struct Fileinfo *fi,
 
   for (ypos = fi->height - 1; ypos >= 0 && ! eof; ypos--)
     {
-      gsize offset = (fi->tile_height - fi->tile_n - 1) * fi->rowstride;
+      gsize offset = (fi->tile_height - fi->tile_n - 1) * rowstride;
 
-      if (! eof)
+      switch (bmpfmt)
         {
-          switch (bmpfmt)
-            {
-            case BMPFMT_RGB:
-              if (! load_rgb (fi, offset))
-                eof = TRUE;
-              break;
+        case BMPFMT_RGB:
+          if (! load_rgb (fi, dest + offset))
+            eof = TRUE;
+          break;
 
-            case BMPFMT_RGB_64:
-              if (! load_rgb_64 (fi, offset))
-                eof = TRUE;
-              break;
+        case BMPFMT_RGB_64:
+          if (! load_rgb_64 (fi, dest + offset))
+            eof = TRUE;
+          break;
 
-            case BMPFMT_INDEXED:
-              if (! load_indexed (fi, offset))
-                eof = TRUE;
-              break;
+        case BMPFMT_INDEXED:
+          if (! load_indexed (fi, dest + offset))
+            eof = TRUE;
+          break;
 
-            case BMPFMT_RLE:
-              if (fi->file_ypos < ypos)
-                break;
+        case BMPFMT_RLE:
+          if (fi->file_ypos < ypos)
+            break;
 
-              if (! load_rle (fi, offset))
-                eof = TRUE;
-              break;
+          if (! load_rle (fi, dest + offset))
+            eof = TRUE;
+          break;
 
-            case BMPFMT_HUFFMAN:
-              if (! load_huffman (fi, offset))
-                eof = TRUE;
-              break;
-            }
+        case BMPFMT_HUFFMAN:
+          if (! load_huffman (fi, dest + offset))
+            eof = TRUE;
+          break;
         }
 
       cur_progress++;
@@ -858,18 +865,18 @@ ReadImage (struct Fileinfo *fi,
           /* we are filling the dest buffer backwards, so we need an offset to dest in
            * case the tile_height isn't fully used (when tile_n < tile_height)
            */
-          gsize offs = (fi->tile_height - fi->tile_n) * fi->rowstride * fi->bytesperchannel;
+          offset = (fi->tile_height - fi->tile_n) * rowstride;
 
           gegl_buffer_set (buffer, GEGL_RECTANGLE (0, ypos, fi->width, fi->tile_n), 0, format,
-                           fi->dest + offs, GEGL_AUTO_ROWSTRIDE);
-          memset (fi->dest, 0, dest_size);
+                           dest + offset, GEGL_AUTO_ROWSTRIDE);
+          memset (dest, 0, dest_size);
           fi->tile_n = 0;
         }
     }
 
   g_object_unref (buffer);
 
-  g_free (fi->dest);
+  g_free (dest);
 
   if (! fi->gray && fi->bpp <= 8)
     gimp_palette_set_colormap (gimp_image_get_palette (image), babl_format ("R'G'B' u8"),
@@ -884,21 +891,19 @@ ReadImage (struct Fileinfo *fi,
 }
 
 static gint
-load_rgb (struct Fileinfo *fi, gsize offset)
+load_rgb (struct Fileinfo *fi, guchar *dest)
 {
   gint     xpos, i;
   gint32   px;
   gdouble  d;
-  guchar  *dest8;
   guint16 *dest16;
   guint32 *dest32;
 
-  if (! ReadOK (fi->file, fi->rowbuf, fi->rowbytes))
+  if (! ReadOK (fi->file, fi->rowbuf, fi->bytes_per_row))
     return FALSE;
 
-  dest8  = fi->dest + fi->bytesperchannel * offset;
-  dest16 = (guint16 *) dest8;
-  dest32 = (guint32 *) dest8;
+  dest16 = (guint16 *) dest;
+  dest32 = (guint32 *) dest;
 
   for (xpos = 0; xpos < fi->width; xpos++)
     {
@@ -908,7 +913,7 @@ load_rgb (struct Fileinfo *fi, gsize offset)
           d = ((px & fi->masks[i].mask) >> fi->masks[i].shiftin) / fi->masks[i].max_value;
 
           if (fi->bytesperchannel == 1)
-            *dest8++ = d * 0x00ff + 0.5;
+            *dest++   = d * 0x00ff + 0.5;
           else if (fi->bytesperchannel == 2)
             *dest16++ = d * 0xffffUL + 0.5;
           else
@@ -919,15 +924,15 @@ load_rgb (struct Fileinfo *fi, gsize offset)
 }
 
 static gint
-load_rgb_64 (struct Fileinfo *fi, gsize offset)
+load_rgb_64 (struct Fileinfo *fi, guchar *dest)
 {
   gint    xpos, i;
   gfloat *destflt;
 
-  if (! ReadOK (fi->file, fi->rowbuf, fi->rowbytes))
+  if (! ReadOK (fi->file, fi->rowbuf, fi->bytes_per_row))
     return FALSE;
 
-  destflt = (gfloat *) fi->dest + offset;
+  destflt = (gfloat *) dest;
 
   for (xpos = 0; xpos < fi->width; ++xpos)
     {
@@ -946,15 +951,13 @@ load_rgb_64 (struct Fileinfo *fi, gsize offset)
 }
 
 static gint
-load_indexed (struct Fileinfo *fi, gsize offset)
+load_indexed (struct Fileinfo *fi, guchar *dest)
 {
-  gint    xpos, val, shift;
-  guchar *dest;
+  gint xpos, val, shift;
 
-  if (! ReadOK (fi->file, fi->rowbuf, fi->rowbytes))
+  if (! ReadOK (fi->file, fi->rowbuf, fi->bytes_per_row))
     return FALSE;
 
-  dest = fi->dest + offset;
   for (xpos = 0; xpos < fi->width; xpos++)
     {
       val   = fi->rowbuf[xpos / (8 / fi->bpp)];
@@ -970,10 +973,12 @@ load_indexed (struct Fileinfo *fi, gsize offset)
 }
 
 static gint
-load_rle (struct Fileinfo *fi, gsize offset)
+load_rle (struct Fileinfo *fi, guchar *basedest)
 {
   gint    shift, i, j;
   guchar *dest;
+
+  /* dest must be (re)calculated inside loop, because RLE can skip pixles */
 
   while (fi->xpos <= fi->width)
     {
@@ -996,13 +1001,13 @@ load_rle (struct Fileinfo *fi, gsize offset)
                        i++, fi->xpos++, j++)
                     {
                       shift = 8 - i * fi->bpp;
-                      dest  = fi->dest + offset + fi->xpos * fi->channels;
+                      dest  = basedest + fi->xpos * fi->channels;
+
                       dest[0] = (fi->rowbuf[1] & (((1 << fi->bpp) - 1) << shift)) >> shift;
                       dest[0] = MIN (dest[0], fi->ncolors - 1);
                       if (fi->gray)
                         dest[0] = fi->colormap[dest[0] * 3];
                       dest[1] = 0xff; /* alpha */
-
                     }
                 }
             }
@@ -1017,11 +1022,9 @@ load_rle (struct Fileinfo *fi, gsize offset)
                 }
               for (i = 0; (i < fi->rowbuf[0]) && (fi->xpos < fi->width); i++, fi->xpos++)
                 {
-                  dest  = fi->dest + offset + fi->xpos * fi->channels;
+                  dest = basedest + fi->xpos * fi->channels;
                   for (gint c = 0; c < 3; c++)
-                    {
-                      dest[2 - c] = fi->rowbuf[c + 1];
-                    }
+                    dest[2 - c] = fi->rowbuf[1 + c];
                   dest[3] = 0xff; /* alpha */
                 }
             }
@@ -1044,7 +1047,7 @@ load_rle (struct Fileinfo *fi, gsize offset)
                     }
                 }
 
-              dest = fi->dest + offset + fi->xpos * fi->channels;
+              dest = basedest + fi->xpos * fi->channels;
               switch (fi->bpp)
                 {
                 case 8:
@@ -1054,10 +1057,8 @@ load_rle (struct Fileinfo *fi, gsize offset)
                   dest[0] = (fi->rowbuf[0] >> (4 * ((i + 1) % 2))) & 0x0f;
                   break;
                 case 24:
-                  for (int c = 0; c < 3; c++)
-                    {
-                      dest[2 - c] = fi->rowbuf[c];
-                    }
+                  for (gint c = 0; c < 3; c++)
+                    dest[2 - c] = fi->rowbuf[c];
                   break;
                 }
               dest[fi->channels - 1] = 0xff; /* alpha */
@@ -1124,10 +1125,9 @@ load_rle (struct Fileinfo *fi, gsize offset)
 }
 
 static gint
-load_huffman (struct Fileinfo *fi, gsize offset)
+load_huffman (struct Fileinfo *fi, guchar *dest)
 {
-  gint    xpos = 0, len, i;
-  guchar *dest;
+  gint xpos = 0, len, i;
 
   while (xpos < fi->width)
     {
@@ -1149,11 +1149,8 @@ load_huffman (struct Fileinfo *fi, gsize offset)
           len = huff_decode (&fi->bitbuf, &fi->buflen, fi->file, fi->black);
           if (len >= 0 && len <= fi->width - xpos)
             {
-              dest = fi->dest + offset + xpos;
               for (i = 0; i < len; i++, xpos++)
-                {
-                  dest[i] = fi->black;
-                }
+                *dest++ = fi->black;
               fi->black = ! fi->black;
               continue;
             }

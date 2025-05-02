@@ -136,8 +136,9 @@ gimp_edit_cut (GimpImage     *image,
 
           /* Remove layers from source image. */
           for (iter = drawables; iter; iter = iter->next)
-            gimp_image_remove_layer (image, GIMP_LAYER (iter->data),
-                                     TRUE, NULL);
+            if (! gimp_layer_is_floating_sel (iter->data))
+              gimp_image_remove_layer (image, GIMP_LAYER (iter->data),
+                                       TRUE, NULL);
 
           g_list_free (drawables);
         }
@@ -203,7 +204,21 @@ gimp_edit_copy (GimpImage     *image,
     }
 
   /* Only accept multiple drawables for layers. */
-  g_return_val_if_fail (g_list_length (drawables) == 1 || drawables_are_layers, NULL);
+  if (g_list_length (drawables) > 1 && ! drawables_are_layers)
+    {
+      if (error)
+        {
+          if (copy_for_cut)
+            g_set_error_literal (error, GIMP_ERROR, GIMP_FAILED,
+                                 _("Cannot cut because multiple channels "
+                                   "are selected."));
+          else
+            g_set_error_literal (error, GIMP_ERROR, GIMP_FAILED,
+                                 _("Cannot copy because multiple channels "
+                                   "are selected."));
+        }
+      return NULL;
+    }
 
   if (drawables_are_layers)
     {

@@ -223,6 +223,7 @@ read_dds (GFile                *file,
           fclose (fp);
           return GIMP_PDB_EXECUTION_ERROR;
         }
+      load_info.array_items = dx10hdr.arraySize;
     }
 
   /* If format search was successful, get info needed to parse the file */
@@ -289,6 +290,13 @@ read_dds (GFile                *file,
             case DXGI_FORMAT_BC5_SNORM:
               load_info.comp_format = DDS_COMPRESS_BC5;
               break;
+            /* TODO: Implement BC6 format */
+            case DXGI_FORMAT_BC7_TYPELESS:
+            case DXGI_FORMAT_BC7_UNORM:
+            case DXGI_FORMAT_BC7_UNORM_SRGB:
+              load_info.comp_format = DDS_COMPRESS_BC7;
+              break;
+
             default:
               load_info.comp_format = DDS_COMPRESS_MAX;
               break;
@@ -338,8 +346,6 @@ read_dds (GFile                *file,
       if ((dx10hdr.resourceDimension == D3D10_RESOURCE_DIMENSION_TEXTURE2D) &&
           (dx10hdr.miscFlag & D3D10_RESOURCE_MISC_TEXTURECUBE))
         load_info.cubemap_faces = DDSCAPS2_CUBEMAP_ALL_FACES;
-
-      load_info.array_items = dx10hdr.arraySize;
     }
   else
     {
@@ -971,6 +977,11 @@ validate_dx10_header (dds_header_dx10_t  *dx10hdr,
     case DXGI_FORMAT_BC5_TYPELESS:
     case DXGI_FORMAT_BC5_UNORM:
     case DXGI_FORMAT_BC5_SNORM:
+    /* TODO: Implement BC6 format */
+    case DXGI_FORMAT_BC7_TYPELESS:
+    case DXGI_FORMAT_BC7_UNORM:
+    case DXGI_FORMAT_BC7_UNORM_SRGB:
+
       /* Return early for supported compressed formats */
       load_info->dxgi_format = dx10hdr->dxgiFormat & 0xFF;
       return TRUE;

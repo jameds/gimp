@@ -38,6 +38,8 @@
 
 #include "core-types.h"
 
+#include "operations/gimp-operation-config.h"
+
 #include "gegl/gimp-babl.h"
 #include "gegl/gimpapplicator.h"
 #include "gegl/gimp-gegl-utils.h"
@@ -51,6 +53,7 @@
 #include "gimpidtable.h"
 #include "gimpimage.h"
 #include "gimplayer.h"
+#include "gimplist.h"
 #include "gimpprogress.h"
 
 
@@ -66,6 +69,9 @@ enum
   PROP_ID,
   PROP_DRAWABLE,
   PROP_MASK,
+  PROP_CUSTOM_NAME,
+  PROP_TEMPORARY,
+  PROP_TO_BE_MERGED,
   N_PROPS
 };
 
@@ -81,6 +87,7 @@ struct _GimpDrawableFilter
   GeglNode               *operation;
 
   gboolean                has_input;
+  gboolean                has_custom_name;
 
   gboolean                clip;
   GimpFilterRegion        region;
@@ -97,7 +104,6 @@ struct _GimpDrawableFilter
   GimpLayerCompositeMode  composite_mode;
   gboolean                add_alpha;
   gboolean                color_managed;
-  gboolean                gamma_hack;
 
   gboolean                override_constraints;
 
@@ -106,10 +112,12 @@ struct _GimpDrawableFilter
 
   GeglNode               *translate;
   GeglNode               *crop_before;
-  GeglNode               *cast_before;
-  GeglNode               *cast_after;
   GeglNode               *crop_after;
   GimpApplicator         *applicator;
+
+  gboolean                is_temporary;
+  /* This is mirroring merge_filter option of GimpFilterOptions. */
+  gboolean                to_be_merged;
 };
 
 static void       gimp_drawable_filter_set_property          (GObject             *object,
@@ -140,7 +148,6 @@ static void       gimp_drawable_filter_sync_mode             (GimpDrawableFilter
 static void       gimp_drawable_filter_sync_affect           (GimpDrawableFilter  *filter);
 static void       gimp_drawable_filter_sync_format           (GimpDrawableFilter  *filter);
 static void       gimp_drawable_filter_sync_mask             (GimpDrawableFilter  *filter);
-static void       gimp_drawable_filter_sync_gamma_hack       (GimpDrawableFilter  *filter);
 
 static gboolean   gimp_drawable_filter_is_added              (GimpDrawableFilter  *filter);
 static gboolean   gimp_drawable_filter_is_active             (GimpDrawableFilter  *filter);
@@ -163,6 +170,11 @@ static void       gimp_drawable_filter_drawable_removed      (GimpDrawable      
                                                               GimpDrawableFilter  *filter);
 static void       gimp_drawable_filter_lock_alpha_changed    (GimpLayer           *layer,
                                                               GimpDrawableFilter  *filter);
+
+static void       gimp_drawable_filter_reorder               (GimpFilterStack    *stack,
+                                                              GimpDrawableFilter *reordered_filter,
+                                                              gint                new_index,
+                                                              GimpDrawableFilter *filter);
 
 
 G_DEFINE_TYPE (GimpDrawableFilter, gimp_drawable_filter, GIMP_TYPE_FILTER)
@@ -207,6 +219,21 @@ gimp_drawable_filter_class_init (GimpDrawableFilterClass *klass)
                                                               NULL, NULL,
                                                               GIMP_TYPE_DRAWABLE,
                                                               GIMP_PARAM_READWRITE);
+
+  drawable_filter_props[PROP_CUSTOM_NAME] = g_param_spec_boolean ("custom-name",
+                                                                  NULL, NULL,
+                                                                  FALSE,
+                                                                  GIMP_PARAM_READWRITE);
+
+  drawable_filter_props[PROP_TEMPORARY] = g_param_spec_boolean ("temporary",
+                                                                NULL, NULL,
+                                                                FALSE,
+                                                                GIMP_PARAM_READWRITE);
+
+  drawable_filter_props[PROP_TO_BE_MERGED] = g_param_spec_boolean ("to-be-merged",
+                                                                   NULL, NULL,
+                                                                   FALSE,
+                                                                   GIMP_PARAM_READWRITE);
 
   g_object_class_install_properties (object_class, N_PROPS, drawable_filter_props);
 }
@@ -259,6 +286,19 @@ gimp_drawable_filter_set_property (GObject      *object,
         }
       break;
 
+    case PROP_CUSTOM_NAME:
+      filter->has_custom_name = g_value_get_boolean (value);
+      break;
+
+    case PROP_TEMPORARY:
+      filter->is_temporary = g_value_get_boolean (value);
+      break;
+
+    case PROP_TO_BE_MERGED:
+      filter->to_be_merged = g_value_get_boolean (value);
+      gimp_drawable_filter_sync_format (filter);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -280,6 +320,15 @@ gimp_drawable_filter_get_property (GObject    *object,
       break;
     case PROP_MASK:
       g_value_set_object (value, gimp_drawable_filter_get_mask (filter));
+      break;
+    case PROP_CUSTOM_NAME:
+      g_value_set_boolean (value, filter->has_custom_name);
+      break;
+    case PROP_TEMPORARY:
+      g_value_set_boolean (value, filter->is_temporary);
+      break;
+    case PROP_TO_BE_MERGED:
+      g_value_set_boolean (value, filter->to_be_merged);
       break;
 
     default:
@@ -328,26 +377,34 @@ gimp_drawable_filter_new (GimpDrawable *drawable,
   GimpDrawableFilter *filter;
   GimpImage          *image;
   GeglNode           *node;
+  GeglOperation      *op          = NULL;
+  GeglOperationClass *opclass     = NULL;
+  gboolean            custom_name = TRUE;
 
   g_return_val_if_fail (GIMP_IS_DRAWABLE (drawable), NULL);
   g_return_val_if_fail (GEGL_IS_NODE (operation), NULL);
   g_return_val_if_fail (gegl_node_has_pad (operation, "output"), NULL);
 
+  op = gegl_node_get_gegl_operation (operation);
+  if (op != NULL)
+    opclass = GEGL_OPERATION_GET_CLASS (op);
+
   if (undo_desc == NULL || strlen (undo_desc) == 0)
     {
-      GeglOperation *op;
-      GeglOperationClass *opclass;
-
-      op        = gegl_node_get_gegl_operation (operation);
-      opclass   = GEGL_OPERATION_GET_CLASS (op);
-      undo_desc = gegl_operation_class_get_key (opclass, "title");
+      undo_desc   = gegl_operation_class_get_key (opclass, "title");
+      custom_name = FALSE;
     }
 
+  if (opclass &&
+      ! g_strcmp0 (undo_desc, gegl_operation_class_get_key (opclass, "title")))
+    custom_name = FALSE;
+
   filter = g_object_new (GIMP_TYPE_DRAWABLE_FILTER,
-                         "name",      undo_desc,
-                         "icon-name", icon_name,
-                         "drawable",  drawable,
-                         "mask",      NULL,
+                         "name",        undo_desc,
+                         "icon-name",   icon_name,
+                         "custom-name", custom_name,
+                         "drawable",    drawable,
+                         "mask",        NULL,
                          NULL);
 
   filter->operation = g_object_ref (operation);
@@ -386,28 +443,18 @@ gimp_drawable_filter_new (GimpDrawable *drawable,
                                                  "operation", "gegl:crop",
                                                  NULL);
 
-      filter->cast_before = gegl_node_new_child (node,
-                                                 "operation", "gegl:nop",
-                                                 NULL);
-
       gegl_node_link_many (input,
                            filter->translate,
                            filter->crop_before,
-                           filter->cast_before,
                            filter->operation,
                            NULL);
     }
-
-  filter->cast_after = gegl_node_new_child (node,
-                                            "operation", "gegl:nop",
-                                            NULL);
 
   filter->crop_after = gegl_node_new_child (node,
                                             "operation", "gegl:crop",
                                             NULL);
 
   gegl_node_link_many (filter->operation,
-                       filter->cast_after,
                        filter->crop_after,
                        NULL);
 
@@ -739,9 +786,12 @@ gimp_drawable_filter_set_preview_split (GimpDrawableFilter  *filter,
     }
 }
 
-/* This function is mostly for usage by libgimp API. The idea is to have
+/* This function is **ONLY** for usage by libgimp API. The idea is to have
  * a single function which updates a bunch of settings in a single call
  * and in particular a single rendering update.
+ *
+ * Also it does some funky config object switch for custom operations
+ * which is only needed libgimp-side.
  */
 gboolean
 gimp_drawable_filter_update (GimpDrawableFilter      *filter,
@@ -756,8 +806,12 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
                              const GimpDrawable     **auxinputs,
                              GError                 **error)
 {
+  GimpImage    *image;
+  GimpObject   *settings        = NULL;
+  GeglNode     *node            = NULL;
   GParamSpec  **pspecs;
   gchar        *opname;
+  guint         n_parent_pspecs = 0;
   guint         n_pspecs;
   gint          n_values;
   gint          n_auxinputs;
@@ -792,14 +846,55 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
 
   gegl_node_get (filter->operation, "operation", &opname, NULL);
 
-  pspecs = gegl_operation_list_properties (opname, &n_pspecs);
-  for (gint i = 0; i < n_pspecs; i++)
+  image = gimp_item_get_image (GIMP_ITEM (filter->drawable));
+  node  = gimp_drawable_filter_get_operation (filter);
+  if (gimp_operation_config_is_custom (image->gimp, opname))
     {
+      GObjectClass *klass;
+      GObjectClass *parent_klass;
+
+      gegl_node_get (node,
+                     "config", &settings,
+                     NULL);
+      klass        = G_OBJECT_GET_CLASS (settings);
+      parent_klass = G_OBJECT_CLASS (g_type_class_peek_parent (klass));
+      g_free (g_object_class_list_properties (parent_klass, &n_parent_pspecs));
+      pspecs = g_object_class_list_properties (G_OBJECT_GET_CLASS (settings), &n_pspecs);
+    }
+  else
+    {
+      pspecs = gegl_operation_list_properties (opname, &n_pspecs);
+    }
+
+  for (gint i = n_parent_pspecs; i < n_pspecs; i++)
+    {
+      GParamSpec *target_pspec;
       GParamSpec *pspec     = pspecs[i];
       GValue      old_value = G_VALUE_INIT;
       gint        j;
 
-      gegl_node_get_property (filter->operation, pspec->name, &old_value);
+      if (settings)
+        target_pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (settings), pspec->name);
+      else
+        target_pspec = gegl_node_find_property (node, pspec->name);
+      if (! target_pspec)
+        {
+          /* If this ever happens, this is more likely a bug in our
+           * PDB code, unless someone tried to call the PDB procedure
+           * directly with bad data.
+           */
+          g_set_error (error, GIMP_ERROR, GIMP_FAILED,
+                       /* TODO: localize after string freeze. */
+                       "GEGL operation '%s' has been called with a "
+                       "non-existent argument name '%s' (#%d).",
+                       opname, pspec->name, i);
+          break;
+        }
+
+      if (settings)
+        g_object_get_property (G_OBJECT (settings), pspec->name, &old_value);
+      else
+        gegl_node_get_property (node, pspec->name, &old_value);
 
       for (j = 0; j < n_values; j++)
         if (g_strcmp0 (pspec->name, propnames[j]) == 0)
@@ -867,7 +962,10 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
 
           if (g_param_values_cmp (pspec, new_value, &old_value) != 0)
             {
-              gegl_node_set_property (filter->operation, pspec->name, new_value);
+              if (settings)
+                g_object_set_property (G_OBJECT (settings), pspec->name, new_value);
+              else
+                gegl_node_set_property (node, pspec->name, new_value);
               changed = TRUE;
             }
 
@@ -883,7 +981,10 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
 
           g_value_init (&default_value, pspec->value_type);
           g_param_value_set_default (pspec, &default_value);
-          gegl_node_set_property (filter->operation, pspec->name, &default_value);
+          if (settings)
+            g_object_set_property (G_OBJECT (settings), pspec->name, &default_value);
+          else
+            gegl_node_set_property (node, pspec->name, &default_value);
           changed = TRUE;
 
           g_value_unset (&default_value);
@@ -921,7 +1022,7 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
           GeglNode   *src_node;
           GeglBuffer *buffer;
 
-          if (! gegl_node_has_pad (filter->operation, auxinputnames[i]))
+          if (! gegl_node_has_pad (node, auxinputnames[i]))
             {
               g_set_error (error, GIMP_ERROR, GIMP_FAILED,
                            /* TODO: localize after string freeze. */
@@ -934,18 +1035,22 @@ gimp_drawable_filter_update (GimpDrawableFilter      *filter,
 
           buffer = gimp_drawable_get_buffer (GIMP_DRAWABLE (auxinputs[i]));
           g_object_ref (buffer);
-          src_node = gegl_node_new_child (gegl_node_get_parent (filter->operation),
+          src_node = gegl_node_new_child (gegl_node_get_parent (node),
                                           "operation", "gegl:buffer-source",
                                           "buffer",    buffer,
                                           NULL);
           g_object_unref (buffer);
 
-          gegl_node_connect (src_node, "output", filter->operation, auxinputnames[i]);
+          gegl_node_connect (src_node, "output", node, auxinputnames[i]);
         }
     }
 
+  if (settings)
+    gegl_node_set (node, "config", settings, NULL);
+
   g_object_thaw_notify (G_OBJECT (filter));
 
+  g_clear_object (&settings);
   g_free (pspecs);
   g_free (opname);
 
@@ -1007,28 +1112,7 @@ gimp_drawable_filter_set_add_alpha (GimpDrawableFilter *filter,
   if (add_alpha != filter->add_alpha)
     {
       filter->add_alpha = add_alpha;
-
       gimp_drawable_filter_sync_format (filter);
-
-      if (gimp_drawable_filter_is_active (filter))
-        gimp_drawable_filter_update_drawable (filter, NULL);
-    }
-}
-
-void
-gimp_drawable_filter_set_gamma_hack (GimpDrawableFilter *filter,
-                                     gboolean            gamma_hack)
-{
-  g_return_if_fail (GIMP_IS_DRAWABLE_FILTER (filter));
-
-  if (gamma_hack != filter->gamma_hack)
-    {
-      filter->gamma_hack = gamma_hack;
-
-      gimp_drawable_filter_sync_gamma_hack (filter);
-
-      if (gimp_drawable_filter_is_active (filter))
-        gimp_drawable_filter_update_drawable (filter, NULL);
     }
 }
 
@@ -1300,6 +1384,30 @@ gimp_drawable_filter_sync_clip (GimpDrawableFilter *filter,
 static void
 gimp_drawable_filter_sync_region (GimpDrawableFilter *filter)
 {
+  GimpContainer *filters;
+  gboolean       first_filter = FALSE;
+
+  filters = gimp_drawable_get_filters (filter->drawable);
+
+  /* The first test is because the filter might not be added yet. */
+  if (GIMP_LIST (filters)->queue->tail != NULL &&
+      filter == GIMP_LIST (filters)->queue->tail->data)
+    {
+      GimpDrawableFilter *next_filter = NULL;
+
+      if (GIMP_LIST (filters)->queue->head->next)
+        next_filter = GIMP_LIST (filters)->queue->tail->prev->data;
+
+      if (next_filter)
+        /* If the current filter became the first after a reorder, we
+         * want to re-sync the next filter which was the first filter
+         * just before.
+         */
+        gimp_drawable_filter_sync_region (next_filter);
+
+      first_filter = TRUE;
+    }
+
   if (filter->region == GIMP_FILTER_REGION_SELECTION)
     {
       if (filter->has_input)
@@ -1309,10 +1417,16 @@ gimp_drawable_filter_sync_region (GimpDrawableFilter *filter)
                          "y", (gdouble) -filter->filter_area.y,
                          NULL);
 
-          gegl_node_set (filter->crop_before,
-                         "width",  (gdouble) filter->filter_area.width,
-                         "height", (gdouble) filter->filter_area.height,
-                         NULL);
+          if (first_filter)
+            gegl_node_set (filter->crop_before,
+                           "operation", "gegl:crop",
+                           "width",     (gdouble) filter->filter_area.width,
+                           "height",    (gdouble) filter->filter_area.height,
+                           NULL);
+          else
+            gegl_node_set (filter->crop_before,
+                           "operation", "gegl:nop",
+                           NULL);
         }
 
       if (filter->filter_clip)
@@ -1349,10 +1463,16 @@ gimp_drawable_filter_sync_region (GimpDrawableFilter *filter)
                          "y", (gdouble) 0.0,
                          NULL);
 
-          gegl_node_set (filter->crop_before,
-                         "width",  width,
-                         "height", height,
-                         NULL);
+          if (first_filter)
+            gegl_node_set (filter->crop_before,
+                           "operation", "gegl:crop",
+                           "width",     width,
+                           "height",    height,
+                           NULL);
+          else
+            gegl_node_set (filter->crop_before,
+                           "operation", "gegl:nop",
+                           NULL);
         }
 
       if (filter->filter_clip)
@@ -1530,20 +1650,35 @@ gimp_drawable_filter_sync_affect (GimpDrawableFilter *filter)
 static void
 gimp_drawable_filter_sync_format (GimpDrawableFilter *filter)
 {
-  const Babl *format;
+  const Babl *format = NULL;
+  gboolean    changed;
 
-  if (filter->add_alpha                                &&
-      (gimp_drawable_supports_alpha (filter->drawable) ||
-       filter->override_constraints))
+  /* We only convert back to drawable format when the filter is planned
+   * to be merged, to simulate how it would look like once it happens.
+   *
+   * On the other hand, when a filter is meant to stay on the stack,
+   * non-destructively, the output might be higher bit depth and there
+   * is no reason to demote it back.
+   *
+   * XXX: actually we might want to do this after the last layer mode
+   * node, no? Otherwise the display render might be better in some case
+   * than when the whole image is actually flattened into a single
+   * buffer. But maybe that's what some people would want?
+   */
+  if (filter->to_be_merged)
     {
-      format = gimp_drawable_get_format_with_alpha (filter->drawable);
-    }
-  else
-    {
-      format = gimp_drawable_get_format (filter->drawable);
+      if (filter->add_alpha                                &&
+          (gimp_drawable_supports_alpha (filter->drawable) ||
+           filter->override_constraints))
+        format = gimp_drawable_get_format_with_alpha (filter->drawable);
+      else
+        format = gimp_drawable_get_format (filter->drawable);
     }
 
-  gimp_applicator_set_output_format (filter->applicator, format);
+  changed = gimp_applicator_set_output_format (filter->applicator, format);
+
+  if (changed && gimp_drawable_filter_is_active (filter))
+    gimp_drawable_filter_update_drawable (filter, NULL);
 }
 
 static void
@@ -1596,62 +1731,6 @@ gimp_drawable_filter_sync_mask (GimpDrawableFilter *filter)
     }
 }
 
-static void
-gimp_drawable_filter_sync_gamma_hack (GimpDrawableFilter *filter)
-{
-  if (filter->gamma_hack)
-    {
-      const Babl  *drawable_format;
-      const Babl  *cast_format;
-      GimpTRCType  trc = GIMP_TRC_LINEAR;
-
-      switch (gimp_drawable_get_trc (filter->drawable))
-        {
-        case GIMP_TRC_LINEAR:     trc = GIMP_TRC_NON_LINEAR; break;
-        case GIMP_TRC_NON_LINEAR: trc = GIMP_TRC_LINEAR;     break;
-        case GIMP_TRC_PERCEPTUAL: trc = GIMP_TRC_LINEAR;     break;
-        }
-
-      drawable_format =
-        gimp_drawable_get_format_with_alpha (filter->drawable);
-
-      cast_format =
-        gimp_babl_format (gimp_babl_format_get_base_type (drawable_format),
-                          gimp_babl_precision (gimp_babl_format_get_component_type (drawable_format),
-                                               trc),
-                          TRUE,
-                          babl_format_get_space (drawable_format));
-
-      if (filter->has_input)
-        {
-          gegl_node_set (filter->cast_before,
-                         "operation",     "gegl:cast-format",
-                         "input-format",  drawable_format,
-                         "output-format", cast_format,
-                         NULL);
-        }
-
-      gegl_node_set (filter->cast_after,
-                     "operation",     "gegl:cast-format",
-                     "input-format",  cast_format,
-                     "output-format", drawable_format,
-                     NULL);
-    }
-  else
-    {
-      if (filter->has_input)
-        {
-          gegl_node_set (filter->cast_before,
-                         "operation", "gegl:nop",
-                         NULL);
-        }
-
-      gegl_node_set (filter->cast_after,
-                     "operation", "gegl:nop",
-                     NULL);
-    }
-}
-
 static gboolean
 gimp_drawable_filter_is_added (GimpDrawableFilter *filter)
 {
@@ -1671,7 +1750,8 @@ gimp_drawable_filter_add_filter (GimpDrawableFilter *filter)
 {
   if (! gimp_drawable_filter_is_added (filter))
     {
-      GimpImage *image = gimp_item_get_image (GIMP_ITEM (filter->drawable));
+      GimpImage     *image = gimp_item_get_image (GIMP_ITEM (filter->drawable));
+      GimpContainer *filters;
 
       gimp_viewable_preview_freeze (GIMP_VIEWABLE (filter->drawable));
 
@@ -1689,11 +1769,10 @@ gimp_drawable_filter_add_filter (GimpDrawableFilter *filter)
       gimp_drawable_filter_sync_opacity (filter);
       gimp_drawable_filter_sync_mode (filter);
       gimp_drawable_filter_sync_affect (filter);
-      gimp_drawable_filter_sync_format (filter);
-      gimp_drawable_filter_sync_gamma_hack (filter);
 
       gimp_drawable_add_filter (filter->drawable,
                                 GIMP_FILTER (filter));
+      gimp_drawable_filter_sync_format (filter);
 
       gimp_drawable_update_bounding_box (filter->drawable);
 
@@ -1721,6 +1800,18 @@ gimp_drawable_filter_add_filter (GimpDrawableFilter *filter)
                                    filter, 0);
         }
 
+      filters = gimp_drawable_get_filters (filter->drawable);
+      g_signal_connect_object (G_OBJECT (filters), "reorder",
+                               G_CALLBACK (gimp_drawable_filter_reorder),
+                               filter, 0);
+
+      g_signal_connect_object (G_OBJECT (filter->operation), "notify",
+                               G_CALLBACK (gimp_drawable_filters_changed),
+                               filter->drawable, G_CONNECT_SWAPPED);
+      g_signal_connect_object (G_OBJECT (filter), "active-changed",
+                               G_CALLBACK (gimp_drawable_filters_changed),
+                               filter->drawable, G_CONNECT_SWAPPED);
+
       return TRUE;
     }
 
@@ -1732,8 +1823,18 @@ gimp_drawable_filter_remove_filter (GimpDrawableFilter *filter)
 {
   if (gimp_drawable_filter_is_added (filter))
     {
-      GimpImage    *image    = gimp_item_get_image (GIMP_ITEM (filter->drawable));
-      GimpDrawable *drawable = filter->drawable;
+      GimpImage     *image    = gimp_item_get_image (GIMP_ITEM (filter->drawable));
+      GimpDrawable  *drawable = filter->drawable;
+      GimpContainer *filters;
+
+      g_signal_handlers_disconnect_by_func (G_OBJECT (filter),
+                                            G_CALLBACK (gimp_drawable_filters_changed),
+                                            filter->drawable);
+
+      filters = gimp_drawable_get_filters (filter->drawable);
+      g_signal_handlers_disconnect_by_func (filters,
+                                            G_CALLBACK (gimp_drawable_filter_reorder),
+                                            filter);
 
       if (GIMP_IS_LAYER (drawable))
         g_signal_handlers_disconnect_by_func (drawable,
@@ -1875,4 +1976,28 @@ gimp_drawable_filter_lock_alpha_changed (GimpLayer          *layer,
 {
   gimp_drawable_filter_sync_affect (filter);
   gimp_drawable_filter_update_drawable (filter, NULL);
+}
+
+static void
+gimp_drawable_filter_reorder (GimpFilterStack    *stack,
+                              GimpDrawableFilter *reordered_filter,
+                              gint                new_index,
+                              GimpDrawableFilter *filter)
+{
+  if (reordered_filter == filter)
+    {
+      gimp_drawable_filter_sync_format (filter);
+
+      g_return_if_fail (GIMP_LIST (stack)->queue->head != NULL);
+
+      if (GIMP_LIST (stack)->queue->head->data != filter &&
+          /* When there is a floating selection, there will be a
+           * GimpFilter (but not a drawable filter) in the stack.
+           * XXX For now, let's fix the crash (#12851) but eventually we
+           * really want to clean up this list and understand better how
+           * it's organized.
+           */
+          GIMP_IS_DRAWABLE_FILTER (GIMP_LIST (stack)->queue->head->data))
+        gimp_drawable_filter_sync_format (GIMP_LIST (stack)->queue->head->data);
+    }
 }

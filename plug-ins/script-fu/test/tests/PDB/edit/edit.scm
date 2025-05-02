@@ -38,7 +38,7 @@
                               (make-vector 1 testLayer)
                               "testBufferName"))
 ; There is one named buffer
-(assert `(= (length (gimp-buffers-get-list "")) 1))
+(assert `(= (length (gimp-buffers-get-name-list "")) 1))
 
 
 
@@ -97,7 +97,7 @@
 (test! "named-paste")
 
 ; There is one named buffer
-(assert `(= (length (gimp-buffers-get-list "")) 1))
+(assert `(= (length (gimp-buffers-get-name-list "")) 1))
 
 ; named-paste returns just the floating sel
 (assert `(gimp-edit-named-paste
@@ -108,16 +108,16 @@
 
 (test! "paste  into")
 ; paste when clipboard is not empty returns a vector of length one
-; returns (#(x))
 (assert `(= (vector-length (gimp-edit-paste ,testLayer TRUE)) ; paste-into
             1))
 
 ; The first pasted floating layer was anchored (merged into) first layer
-; The ID of the floating sel is now invalid
+; The ID of the first floating sel is now invalid !
 (assert `(not (gimp-item-id-is-valid ,testPastedLayer)))
-; Can't do this, it throws CRITICAL
-;(assert-error `(gimp-layer-is-floating-sel ,testPastedLayer)
-;              "Procedure")
+; The first floating sel MUST NOT BE USED AGAIN !
+(assert-error `(gimp-layer-is-floating-sel ,testPastedLayer)
+              "Invalid value for argument 0")
+
 
 ; There are now two layers
 (assert `(= (vector-length (gimp-image-get-layers ,testImage)) 2))
@@ -130,53 +130,15 @@
 
 
 
+(test! "paste into empty image")
 
 ; paste specifying no destination layer is an error.
-; You cannot paste into an empty image because you must pass a destination layer.
+; You cannot paste into an empty image having no layers
+; because you must pass a destination layer.
 ; !!! This is different from the GUI
 (assert-error `(gimp-edit-paste -1 TRUE)
               "Invalid value for argument 0")
 
-
-
-
-
-
-(test! "edit-cut when selection")
-
-; setup, create a selection
-(assert `(gimp-selection-all ,testImage))
-(assert `(not (gimp-selection-is-empty ,testImage)))
-
-(assert `(gimp-edit-cut (make-vector 1 (vector-ref ,testLayers 0))))
-; There are still two layers
-(assert `(= (vector-length (gimp-image-get-layers ,testImage)) 2))
-; !!! No API method is-clipboard-empty
-
-
-(test! "edit-named-cut when selection")
-(assert `(gimp-edit-named-cut (make-vector 1 (vector-ref ,testLayers 0)) "testBufferName2"))
-; There are still two layers
-(assert `(= (vector-length (gimp-image-get-layers ,testImage)) 2))
-; There is two named buffer
-(assert `(= (length (gimp-buffers-get-list ""))
-            2))
-
-
-(test! "cut when no selection")
-
-; setup, delete selection
-(assert `(gimp-selection-none ,testImage))
-(assert `(gimp-selection-is-empty ,testImage))
-
-; cut when no selection cuts given layers out of image
-; Cut one of two layers.
-; returns #t when succeeds
-(assert `(gimp-edit-cut (make-vector 1 (vector-ref ,testLayers 0))))
-; effective: count layers now 0
-; FIXME, the count of layers should be 1, since we cut only one of 2
-(assert `(= (vector-length (gimp-image-get-layers ,testImage))
-            0))
 
 
 
@@ -192,7 +154,6 @@
 ; cleanup
 ; delete buffers, other tests may expect no buffers
 (gimp-buffer-delete "testBufferName")
-(gimp-buffer-delete "testBufferName2")
 
 ; for debugging individual test file
 (testing:show testImage)

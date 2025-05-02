@@ -17,53 +17,46 @@ if (-not $GITLAB_CI)
       }
 
     $GIT_DEPTH = '1'
+
+    $PARENT_DIR = '\..'
   }
 
 
 # Install the required (pre-built) packages for babl, GEGL and GIMP
-#MSYS2 forces us to presume 'InstallLocation'. See: https://github.com/msys2/msys2-installer/issues/85
-$MSYS2_PREFIX = 'C:/msys64'
-if ($MSYSTEM_PREFIX -eq 'mingw32')
+if (-not $MSYS_ROOT)
   {
-    Write-Host '(WARNING): 32-bit builds will be dropped in a future release. See: https://gitlab.gnome.org/GNOME/gimp/-/issues/10922' -ForegroundColor Yellow
-    $MSYSTEM_PREFIX = 'mingw32'
-    $MINGW_PACKAGE_PREFIX = 'mingw-w64-i686'
+    $MSYS_ROOT = $(Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall -Recurse | ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } | Where-Object { $_.PSObject.Properties.Value -like "*The MSYS2 Developers*" } | ForEach-Object { return "$($_.InstallLocation)" }) -replace '\\','/'
+    if ("$MSYS_ROOT" -eq '')
+      {
+        Write-Host '(ERROR): MSYS2 installation not found. Please, install it with: winget install MSYS2.MSYS2' -ForegroundColor Red
+        exit 1
+      }
   }
-elseif ((Get-WmiObject -Class Win32_ComputerSystem).SystemType -like 'ARM64*')
+if (-not $MSYSTEM_PREFIX)
   {
-    $MSYSTEM_PREFIX = 'clangarm64'
-    $MINGW_PACKAGE_PREFIX = 'mingw-w64-clang-aarch64'
+    $MSYSTEM_PREFIX = if ((Get-WmiObject Win32_ComputerSystem).SystemType -like 'ARM64*') { 'clangarm64' } else { 'clang64' }
   }
-elseif ((Get-WmiObject -Class Win32_ComputerSystem).SystemType -like 'x64*')
-  {
-    $MSYSTEM_PREFIX = 'clang64'
-    $MINGW_PACKAGE_PREFIX = 'mingw-w64-clang-x86_64'
-  }
-$env:Path = "$MSYS2_PREFIX/$MSYSTEM_PREFIX/bin;$MSYS2_PREFIX/usr/bin;" + $env:Path
+$env:Path = "$MSYS_ROOT/$MSYSTEM_PREFIX/bin;" + $env:Path
 
 Write-Output "$([char]27)[0Ksection_start:$(Get-Date -UFormat %s -Millisecond 0):deps_install[collapsed=true]$([char]13)$([char]27)[0KInstalling dependencies provided by MSYS2"
 if ("$PSCommandPath" -like "*1_build-deps-msys2.ps1*" -or "$CI_JOB_NAME" -like "*deps*")
   {
-    pacman --noconfirm -Suy
+    & $MSYS_ROOT\usr\bin\pacman --noconfirm -Suy
   }
-pacman --noconfirm -S --needed base-devel $MINGW_PACKAGE_PREFIX-toolchain (Get-Content build/windows/all-deps-uni.txt).Replace('${MINGW_PACKAGE_PREFIX}',$MINGW_PACKAGE_PREFIX).Replace(' \','')
+& $MSYS_ROOT\usr\bin\pacman --noconfirm -S --needed $(if ($MSYSTEM_PREFIX -ne 'mingw32') { "$(if ($MSYSTEM_PREFIX -eq 'clangarm64') { 'mingw-w64-clang-aarch64' } else { 'mingw-w64-clang-x86_64' })-perl" }) (Get-Content build/windows/all-deps-uni.txt).Replace('${MINGW_PACKAGE_PREFIX}',$(if ($MINGW_PACKAGE_PREFIX) { "$MINGW_PACKAGE_PREFIX" } elseif ($MSYSTEM_PREFIX -eq 'clangarm64') { 'mingw-w64-clang-aarch64' } else { 'mingw-w64-clang-x86_64' })).Replace(' \','')
 Write-Output "$([char]27)[0Ksection_end:$(Get-Date -UFormat %s -Millisecond 0):deps_install$([char]13)$([char]27)[0K"
 
 
 # Prepare env
 $GIMP_DIR = $PWD
+Set-Location ${GIMP_DIR}${PARENT_DIR}
 
-if (-not $GITLAB_CI)
+if (-not $GIMP_PREFIX)
   {
-    Set-Location ..
-
-    if (-not $GIMP_PREFIX)
-      {
-        $GIMP_PREFIX = "$PWD\_install"
-      }
-
-    Invoke-Expression ((Get-Content $GIMP_DIR\.gitlab-ci.yml | Select-String 'win_environ\[' -Context 0,5) -replace '> ','' -replace '- ','')
+    $GIMP_PREFIX = "$PWD\_install"
   }
+
+Invoke-Expression ((Get-Content $GIMP_DIR\.gitlab-ci.yml | Select-String 'win_environ\[' -Context 0,7) -replace '> ','' -replace '- ','')
 
 
 # Build babl and GEGL
@@ -75,7 +68,6 @@ function self_build ([string]$dep, [string]$option1, [string]$option2)
     if (-not (Test-Path $dep))
       {
         $repo="https://gitlab.gnome.org/GNOME/$dep.git"
-
         # For tagged jobs (i.e. release or test jobs for upcoming releases), use the
         # last tag. Otherwise use the default branch's HEAD.
         if ($CI_COMMIT_TAG)
@@ -85,7 +77,6 @@ function self_build ([string]$dep, [string]$option1, [string]$option2)
             $git_options="--branch=$tag"
             Write-Output "Using tagged release of ${dep}: $tag"
           }
-
         git clone $git_options --depth $GIT_DEPTH $repo
       }
     Set-Location $dep
@@ -94,7 +85,7 @@ function self_build ([string]$dep, [string]$option1, [string]$option2)
     ## Configure and/or build
     if (-not (Test-Path _build-$MSYSTEM_PREFIX\build.ninja -Type Leaf))
       {
-        meson setup _build-$MSYSTEM_PREFIX -Dprefix="$GIMP_PREFIX" $option1 $option2
+        meson setup _build-$MSYSTEM_PREFIX -Dprefix="$GIMP_PREFIX" $PKGCONF_RELOCATABLE_OPTION $option1 $option2
       }
     Set-Location _build-$MSYSTEM_PREFIX
     ninja
@@ -104,13 +95,11 @@ function self_build ([string]$dep, [string]$option1, [string]$option2)
         ## We need to manually check failures in pre-7.4 PS
         exit 1
       }
-    ccache --show-stats
     Set-Location ../..
     Write-Output "$([char]27)[0Ksection_end:$(Get-Date -UFormat %s -Millisecond 0):${dep}_build$([char]13)$([char]27)[0K"
   }
 
-#FIXME: babl dev docs are broken. See: https://gitlab.gnome.org/GNOME/babl/-/issues/97
-self_build babl '-Dwith-docs=false'
-self_build gegl '-Dworkshop=true'
+self_build babl
+self_build gegl
 
 Set-Location $GIMP_DIR

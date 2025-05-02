@@ -10,8 +10,8 @@
         (width (car (gimp-drawable-get-width tdrawable)))
         (height (car (gimp-drawable-get-height tdrawable)))
         (img (car (gimp-image-new width height RGB)))
-;       (layer-two (car (gimp-layer-new img width height RGB-IMAGE "Y Dots" 100 LAYER-MODE-MULTIPLY)))
-        (layer-one (car (gimp-layer-new img width height RGB-IMAGE "X Dots" 100 LAYER-MODE-NORMAL)))
+;       (layer-two (car (gimp-layer-new img "Y Dots" width height RGB-IMAGE 100 LAYER-MODE-MULTIPLY)))
+        (layer-one (car (gimp-layer-new img "X Dots" width height RGB-IMAGE 100 LAYER-MODE-NORMAL)))
         (layer-two 0)
         (bump-layer 0)
         )
@@ -30,7 +30,7 @@
                                     "independent" FALSE "red" 0.7 "alpha" 0.7
                                     "correlated" FALSE "seed" (msrg-rand) "linear" TRUE)
 
-    (set! layer-two (car (gimp-layer-copy layer-one 0)))
+    (set! layer-two (car (gimp-layer-copy layer-one)))
     (gimp-layer-set-mode layer-two LAYER-MODE-MULTIPLY)
     (gimp-image-insert-layer img layer-two 0 0)
 
@@ -72,7 +72,7 @@
   SF-ADJUSTMENT _"Blur X"         '(9 3 100 1 10 0 1)
   SF-ADJUSTMENT _"Blur Y"         '(9 3 100 1 10 0 1)
   SF-ADJUSTMENT _"Azimuth"        '(135 0 360 1 10 1 0)
-  SF-ADJUSTMENT _"Elevation"      '(45 0 90 1 10 1 0)
+  SF-ADJUSTMENT _"Elevation"      '(45 0.5 90 1 10 1 0)
   SF-ADJUSTMENT _"Depth"          '(3 1 50 1 10 0 1)
 )
 

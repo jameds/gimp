@@ -30,9 +30,9 @@
 /**
  * SECTION: gimpfile
  * @title: gimpfile
- * @short_description: Image file operations (load, save, etc.)
+ * @short_description: Image file operations (load, export, etc.)
  *
- * Image file operations (load, save, etc.)
+ * Image file operations (load, export, etc.)
  **/
 
 
@@ -171,13 +171,14 @@ gimp_file_load_layers (GimpRunMode  run_mode,
  * gimp_file_save:
  * @run_mode: The run mode.
  * @image: Input image.
- * @file: The file to save the image in.
+ * @file: The file to save or export the image in.
  * @options: (nullable): Export option settings.
  *
- * Saves a file by extension.
+ * Saves to XCF or export @image to any supported format by extension.
  *
- * This procedure invokes the correct file save handler according to
- * the file's extension and/or prefix.
+ * This procedure invokes the correct file save/export handler
+ * according to @file's extension and/or prefix.
+ *
  * The @options argument is currently unused and should be set to %NULL
  * right now.
  *
@@ -213,24 +214,28 @@ gimp_file_save (GimpRunMode        run_mode,
 }
 
 /**
- * gimp_file_save_thumbnail:
+ * gimp_file_create_thumbnail:
  * @image: The image.
  * @file: The file the thumbnail belongs to.
  *
- * Saves a thumbnail for the given image
+ * Creates a thumbnail of @image for the given @file
  *
- * This procedure saves a thumbnail for the given image according to
- * the Free Desktop Thumbnail Managing Standard. The thumbnail is saved
- * so that it belongs to the given file. This means you have to save
- * the image under this name first, otherwise this procedure will fail.
- * This procedure may become useful if you want to explicitly save a
- * thumbnail with a file.
+ * This procedure creates a thumbnail for the given @file and stores it
+ * according to relevant standards.
+ * In particular, it will follow the [Free Desktop Thumbnail Managing
+ * Standard](https://specifications.freedesktop.org/thumbnail-spec/late
+ * st/thumbsave.html) when relevant.
+ *
+ * The thumbnail is stored so that it belongs to the given @file. This
+ * means you have to save @image under this name first. As a fallback,
+ * the call will work if @image was exported or imported as @file. In
+ * any other case, this procedure will fail.
  *
  * Returns: TRUE on success.
  **/
 gboolean
-gimp_file_save_thumbnail (GimpImage *image,
-                          GFile     *file)
+gimp_file_create_thumbnail (GimpImage *image,
+                            GFile     *file)
 {
   GimpValueArray *args;
   GimpValueArray *return_vals;
@@ -242,7 +247,7 @@ gimp_file_save_thumbnail (GimpImage *image,
                                           G_TYPE_NONE);
 
   return_vals = _gimp_pdb_run_procedure_array (gimp_get_pdb (),
-                                               "gimp-file-save-thumbnail",
+                                               "gimp-file-create-thumbnail",
                                                args);
   gimp_value_array_unref (args);
 

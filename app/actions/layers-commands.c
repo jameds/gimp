@@ -271,6 +271,9 @@ layers_edit_attributes_cmd_callback (GimpAction *action,
 
   layer = layers->data;
 
+  if (gimp_layer_is_floating_sel (layer))
+    return;
+
 #define EDIT_DIALOG_KEY "gimp-layer-edit-attributes-dialog"
 
   dialog = dialogs_get_dialog (G_OBJECT (layer), EDIT_DIALOG_KEY);
@@ -832,6 +835,7 @@ layers_duplicate_cmd_callback (GimpAction *action,
                             gimp_layer_get_parent (iter->data),
                             gimp_item_get_index (iter->data),
                             TRUE);
+      gimp_drawable_enable_resize_undo (GIMP_DRAWABLE (new_layer));
       new_layers = g_list_prepend (new_layers, new_layer);
 
       /* Import any attached layer effects */
@@ -943,11 +947,47 @@ layers_merge_group_cmd_callback (GimpAction *action,
 
           for (iter2 = layers; iter2; iter2 = iter2->next)
             {
+              if (iter->data == iter2->data)
+                continue;
+
               /* Do not merge a layer when we already merge one of its
                * ancestors.
                */
               if (gimp_viewable_is_ancestor (iter2->data, iter->data))
                 break;
+
+              /* Do not merge a layer which has a little sister (same
+               * parent and smaller index) or a little cousin (one of
+               * its ancestors is a little sister) of a pass-through
+               * group layer.
+               * These will be rendered and merged through the
+               * pass-through by definition.
+               */
+              if (gimp_viewable_get_children (GIMP_VIEWABLE (iter2->data)) &&
+                  gimp_layer_get_mode (iter2->data) == GIMP_LAYER_MODE_PASS_THROUGH)
+                {
+                  GimpLayer *pass_through_parent = gimp_layer_get_parent (iter2->data);
+                  GimpLayer *cousin              = iter->data;
+                  gboolean   ignore = FALSE;
+
+                  do
+                    {
+                      GimpLayer *cousin_parent = gimp_layer_get_parent (cousin);
+
+                      if (pass_through_parent == cousin_parent &&
+                          gimp_item_get_index (GIMP_ITEM (iter2->data)) < gimp_item_get_index (GIMP_ITEM (cousin)))
+                        {
+                          ignore = TRUE;
+                          break;
+                        }
+
+                      cousin = cousin_parent;
+                    }
+                  while (cousin != NULL);
+
+                  if (ignore)
+                    break;
+                }
             }
 
           if (iter2 == NULL)
@@ -999,7 +1039,7 @@ layers_delete_cmd_callback (GimpAction *action,
   removed_layers = g_list_copy (layers);
 
   /* Removing children layers (they will be removed anyway by removing
-   * the parent.
+   * the parent).
    */
   for (iter = removed_layers; iter; iter = iter->next)
     {

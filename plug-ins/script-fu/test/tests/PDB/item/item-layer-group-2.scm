@@ -14,21 +14,14 @@
 ; gimp-logo.png has only one layer
 
 ; another layer for reorder tests
-(define testLayer2 (gimp-layer-new
-                    testImage
-                    21
-                    22
-                    RGB-IMAGE
-                    "LayerNew"
-                    50.0
-                    LAYER-MODE-NORMAL))
+(define testLayer2 (testing:layer-new testImage))
 
 
 ; group-new not throw
 ; This is setup, not an assert, because we need to capture the group's ID
 ; Note the ID is not wrapped in list
-(define testGroup (gimp-group-layer-new testImage))
-(define testGroup2 (gimp-group-layer-new testImage))
+(define testGroup (gimp-group-layer-new testImage ""))
+(define testGroup2 (gimp-group-layer-new testImage ""))
 
 
 

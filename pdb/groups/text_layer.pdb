@@ -22,16 +22,22 @@ sub text_layer_new {
     $blurb = 'Creates a new text layer.';
 
     $help = <<'HELP';
-This procedure creates a new text layer. The arguments are kept as
-simple as necessary for the normal case. All text attributes, however,
-can be modified with the appropriate gimp_text_layer_set_*()
-procedures. The new layer still needs to be added to the image, as
-this is not automatic. Add the new layer using gimp_image_insert_layer().
+This procedure creates a new text layer displaying the specified @text. By
+default the width and height of the layer will be determined by the @text
+contents, the @font, @size and @unit.
+
+
+The new layer still needs to be added to the image as this is not
+automatic. Add the new layer with the [method@Image.insert_layer]
+method.
+
+
+The arguments are kept as simple as necessary for the basic case. All
+text attributes, however, can be modified with the appropriate
+`gimp_text_layer_set_*()` procedures.
 HELP
 
     &marcus_pdb_misc('2008', '2.6');
-
-    $lib_private = 1;
 
     @inargs = (
         { name => 'image', type => 'image',
@@ -48,34 +54,49 @@ HELP
 
     @outargs = (
         { name => 'layer', type => 'text_layer',
-          desc => 'The new text layer.' }
+          desc => 'The new text layer. The object belongs to libgimp and you should not free it.' }
     );
 
     %invoke = (
         code => <<'CODE'
 {
-  GimpText  *gimp_text;
-  GeglColor *color;
-
-  color = gimp_context_get_foreground (context);
-
-  gimp_text = g_object_new (GIMP_TYPE_TEXT,
-                            "text",           text,
-                            "font",           font,
-                            "font-size",      size,
-                            "font-size-unit", unit,
-                            "color",          color,
-                            NULL);
-
-  layer = GIMP_TEXT_LAYER (gimp_text_layer_new (image, gimp_text));
-  g_object_unref (gimp_text);
-
-  if (! layer)
+  if (font == NULL || unit == NULL)
     {
       g_set_error (error, GIMP_PDB_ERROR, GIMP_PDB_ERROR_INVALID_ARGUMENT,
+                   /* TODO: write a more explicit error message after
+                    * string freeze.
+                    */
                    _("Failed to create text layer"));
 
       success = FALSE;
+    }
+
+  if (success)
+    {
+      GimpText  *gimp_text;
+      GeglColor *color;
+
+      color = gimp_context_get_foreground (context);
+
+      gimp_text = g_object_new (GIMP_TYPE_TEXT,
+                                "text",           text,
+                                "gimp",           gimp,
+                                "font",           font,
+                                "font-size",      size,
+                                "font-size-unit", unit,
+                                "color",          color,
+                                NULL);
+
+      layer = GIMP_TEXT_LAYER (gimp_text_layer_new (image, gimp_text));
+      g_object_unref (gimp_text);
+
+      if (! layer)
+        {
+          g_set_error (error, GIMP_PDB_ERROR, GIMP_PDB_ERROR_INVALID_ARGUMENT,
+                       _("Failed to create text layer"));
+
+          success = FALSE;
+        }
     }
 }
 CODE
@@ -339,7 +360,7 @@ HELP
           desc => 'The text layer' },
         { name => 'font_size', type => '0.0 <= double <= 8192.0',
           desc => 'The font size' },
-        { name => 'unit', type => 'unit',
+        { name => 'unit', type => 'unit', allow_pixel => 1,
           desc => 'The unit to use for the font size' }
     );
 

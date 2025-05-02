@@ -46,6 +46,7 @@
 #include "gimpcontext.h"
 #include "gimpdrawable-filters.h"
 #include "gimpdrawable-floating-selection.h"
+#include "gimpdrawablefilter.h"
 #include "gimpdrawablestack.h"
 #include "gimpgrid.h"
 #include "gimperror.h"
@@ -288,6 +289,8 @@ static gint     gimp_image_layer_stack_cmp         (GList           *layers1,
 static void gimp_image_rec_remove_layer_stack_dups (GimpImage       *image,
                                                     GSList          *start);
 static void     gimp_image_clean_layer_stack       (GimpImage       *image);
+static void     gimp_image_rec_filter_remove_undo  (GimpImage       *image,
+                                                    GimpLayer       *layer);
 static void     gimp_image_remove_from_layer_stack (GimpImage       *image,
                                                     GimpLayer       *layer);
 static gint     gimp_image_selected_is_descendant  (GimpViewable    *selected,
@@ -2030,6 +2033,50 @@ gimp_image_clean_layer_stack (GimpImage *image)
 }
 
 static void
+gimp_image_rec_filter_remove_undo (GimpImage *image,
+                                   GimpLayer *layer)
+{
+  GimpContainer *filters;
+
+  if (gimp_viewable_get_children (GIMP_VIEWABLE (layer)))
+    {
+      GimpContainer *stack = gimp_viewable_get_children (GIMP_VIEWABLE (layer));
+      GList         *children;
+      GList         *iter;
+
+      children = gimp_item_stack_get_item_iter (GIMP_ITEM_STACK (stack));
+
+      for (iter = children; iter; iter = iter->next)
+        {
+          GimpLayer *child = iter->data;
+
+          gimp_image_rec_filter_remove_undo (image, child);
+        }
+    }
+
+  filters = gimp_drawable_get_filters (GIMP_DRAWABLE (layer));
+
+  if (gimp_container_get_n_children (filters) > 0)
+    {
+      GList *filter_list;
+
+      for (filter_list = GIMP_LIST (filters)->queue->tail; filter_list;
+           filter_list = g_list_previous (filter_list))
+        {
+          if (GIMP_IS_DRAWABLE_FILTER (filter_list->data))
+            {
+              GimpDrawableFilter *filter = filter_list->data;
+
+              gimp_image_undo_push_filter_remove (image,
+                                                  _("Remove filter"),
+                                                  GIMP_DRAWABLE (layer),
+                                                  filter);
+            }
+        }
+    }
+}
+
+static void
 gimp_image_remove_from_layer_stack (GimpImage *image,
                                     GimpLayer *layer)
 {
@@ -3140,6 +3187,7 @@ gimp_image_get_xcf_version (GimpImage    *image,
     case 20:
     case 21:
     case 22:
+    case 23:
       if (gimp_version)   *gimp_version   = 300;
       if (version_string) *version_string = "GIMP 3.0";
       break;
@@ -4900,7 +4948,10 @@ gimp_image_set_selected_layers (GimpImage *image,
 
   /*  Make sure the floating_sel always is the active layer  */
   if (floating_sel && (g_list_length (layers2) != 1 || layers2->data != floating_sel))
-    return;
+    {
+      g_list_free (layers2);
+      return;
+    }
 
   selected_layers = gimp_image_get_selected_layers (image);
 
@@ -4919,21 +4970,26 @@ gimp_image_set_selected_layers (GimpImage *image,
 
   if (selection_changed)
     {
+      GList *layers3;
+
       /*  Don't cache selection info for the previous active layer  */
       if (selected_layers)
         gimp_drawable_invalidate_boundary (GIMP_DRAWABLE (selected_layers->data));
 
+      layers3 = g_list_copy (layers2);
       gimp_item_tree_set_selected_items (private->layers, layers2);
 
       /* We cannot edit masks with multiple selected layers. */
-      if (g_list_length (layers2) > 1)
+      if (g_list_length (layers3) > 1)
         {
-          for (iter = layers2; iter; iter = iter->next)
+          for (iter = layers3; iter; iter = iter->next)
             {
               if (gimp_layer_get_mask (iter->data))
                 gimp_layer_set_edit_mask (iter->data, FALSE);
             }
         }
+
+      g_list_free (layers3);
     }
   else
     {
@@ -5331,10 +5387,13 @@ gimp_image_remove_layer (GimpImage *image,
     }
 
   if (push_undo)
-    gimp_image_undo_push_layer_remove (image, undo_desc, layer,
-                                       gimp_layer_get_parent (layer),
-                                       gimp_item_get_index (GIMP_ITEM (layer)),
-                                       selected_layers);
+    {
+      gimp_image_rec_filter_remove_undo (image, layer);
+      gimp_image_undo_push_layer_remove (image, undo_desc, layer,
+                                         gimp_layer_get_parent (layer),
+                                         gimp_item_get_index (GIMP_ITEM (layer)),
+                                         selected_layers);
+    }
 
   g_object_ref (layer);
 
@@ -5439,6 +5498,7 @@ gimp_image_add_layers (GimpImage   *image,
 
       gimp_image_add_layer (image, GIMP_LAYER (new_item),
                             parent, position, TRUE);
+      gimp_drawable_enable_resize_undo (GIMP_DRAWABLE (new_item));
       position++;
     }
 

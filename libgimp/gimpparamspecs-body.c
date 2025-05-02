@@ -28,6 +28,17 @@
  * GIMP_TYPE_PARAM_IMAGE
  */
 
+#define GIMP_PARAM_SPEC_IMAGE(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_IMAGE, GimpParamSpecImage))
+
+typedef struct _GimpParamSpecImage GimpParamSpecImage;
+
+struct _GimpParamSpecImage
+{
+  GParamSpecObject  parent_instance;
+
+  gboolean          none_ok;
+};
+
 static void       gimp_param_image_class_init (GParamSpecClass *klass);
 static void       gimp_param_image_init       (GParamSpec      *pspec);
 static gboolean   gimp_param_image_validate   (GParamSpec      *pspec,
@@ -130,10 +141,37 @@ gimp_param_spec_image (const gchar *name,
   return G_PARAM_SPEC (ispec);
 }
 
+/**
+ * gimp_param_spec_image_none_allowed:
+ * @pspec: a #GParamSpec to hold a [class@Gimp.Image] value.
+ *
+ * Returns: %TRUE if a %NULL value is allowed.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_param_spec_image_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_IMAGE (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_IMAGE (pspec)->none_ok;
+}
+
 
 /*
  * GIMP_TYPE_PARAM_ITEM
  */
+
+#define GIMP_PARAM_SPEC_ITEM(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_ITEM, GimpParamSpecItem))
+
+typedef struct _GimpParamSpecItem GimpParamSpecItem;
+
+struct _GimpParamSpecItem
+{
+  GParamSpecObject  parent_instance;
+
+  gboolean          none_ok;
+};
 
 static void       gimp_param_item_class_init (GParamSpecClass *klass);
 static void       gimp_param_item_init       (GParamSpec      *pspec);
@@ -235,6 +273,22 @@ gimp_param_spec_item (const gchar *name,
   ispec->none_ok = none_ok;
 
   return G_PARAM_SPEC (ispec);
+}
+
+/**
+ * gimp_param_spec_item_none_allowed:
+ * @pspec: a #GParamSpec to hold a [class@Gimp.Item] value.
+ *
+ * Returns: %TRUE if a %NULL value is allowed.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_param_spec_item_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_ITEM (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_ITEM (pspec)->none_ok;
 }
 
 
@@ -882,6 +936,17 @@ gimp_param_spec_path (const gchar *name,
  * GIMP_TYPE_PARAM_DRAWABLE_FILTER
  */
 
+#define GIMP_PARAM_SPEC_DRAWABLE_FILTER(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_DRAWABLE_FILTER, GimpParamSpecDrawableFilter))
+
+typedef struct _GimpParamSpecDrawableFilter GimpParamSpecDrawableFilter;
+
+struct _GimpParamSpecDrawableFilter
+{
+  GParamSpecObject  parent_instance;
+
+  gboolean          none_ok;
+};
+
 static void   gimp_param_drawable_filter_class_init (GParamSpecClass *klass);
 static void   gimp_param_drawable_filter_init       (GParamSpec      *pspec);
 
@@ -957,10 +1022,37 @@ gimp_param_spec_drawable_filter (const gchar *name,
   return G_PARAM_SPEC (fspec);
 }
 
+/**
+ * gimp_param_spec_drawable_filter_none_allowed:
+ * @pspec: a #GParamSpec to hold a [class@Gimp.DrawableFilter] value.
+ *
+ * Returns: %TRUE if a %NULL value is allowed.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_param_spec_drawable_filter_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_DRAWABLE_FILTER (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_DRAWABLE_FILTER (pspec)->none_ok;
+}
+
 
 /*
  * GIMP_TYPE_PARAM_DISPLAY
  */
+
+#define GIMP_PARAM_SPEC_DISPLAY(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_DISPLAY, GimpParamSpecDisplay))
+
+typedef struct _GimpParamSpecDisplay GimpParamSpecDisplay;
+
+struct _GimpParamSpecDisplay
+{
+  GParamSpecObject  parent_instance;
+
+  gboolean          none_ok;
+};
 
 static void       gimp_param_display_class_init (GParamSpecClass *klass);
 static void       gimp_param_display_init       (GParamSpec      *pspec);
@@ -1064,10 +1156,38 @@ gimp_param_spec_display (const gchar *name,
   return G_PARAM_SPEC (dspec);
 }
 
+/**
+ * gimp_param_spec_display_none_allowed:
+ * @pspec: a #GParamSpec to hold a [class@Gimp.Display] value.
+ *
+ * Returns: %TRUE if a %NULL value is allowed.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_param_spec_display_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_DISPLAY (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_DISPLAY (pspec)->none_ok;
+}
+
 
 /*
  * GIMP_TYPE_PARAM_RESOURCE
  */
+
+#define GIMP_PARAM_SPEC_RESOURCE(pspec)    (G_TYPE_CHECK_INSTANCE_CAST ((pspec), GIMP_TYPE_PARAM_RESOURCE, GimpParamSpecResource))
+
+typedef struct _GimpParamSpecResource GimpParamSpecResource;
+
+struct _GimpParamSpecResource
+{
+  GimpParamSpecObject  parent_instance;
+
+  gboolean             none_ok;
+  gboolean             default_to_context;
+};
 
 static void         gimp_param_resource_class_init  (GimpParamSpecObjectClass *klass);
 static void         gimp_param_resource_init        (GParamSpec               *pspec);
@@ -1118,7 +1238,8 @@ gimp_param_resource_init (GParamSpec *pspec)
 {
   GimpParamSpecResource *rspec = GIMP_PARAM_SPEC_RESOURCE (pspec);
 
-  rspec->none_ok = FALSE;
+  rspec->none_ok            = FALSE;
+  rspec->default_to_context = FALSE;
 }
 
 static GParamSpec *
@@ -1291,6 +1412,22 @@ gimp_param_spec_resource (const gchar  *name,
     gimp_param_spec_object_set_default (G_PARAM_SPEC (rspec), G_OBJECT (default_value));
 
   return G_PARAM_SPEC (rspec);
+}
+
+gboolean
+gimp_param_spec_resource_none_allowed (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_RESOURCE (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_RESOURCE (pspec)->none_ok;
+}
+
+gboolean
+gimp_param_spec_resource_defaults_to_context (GParamSpec *pspec)
+{
+  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_RESOURCE (pspec), FALSE);
+
+  return GIMP_PARAM_SPEC_RESOURCE (pspec)->default_to_context;
 }
 
 

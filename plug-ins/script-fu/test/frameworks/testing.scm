@@ -112,7 +112,9 @@
 ; except by proximity in the output.
 (define (test! string)
   (displayln "")
-  (displayln string))
+  (displayln string)
+  ; also to GIMP Error Console
+  (gimp-message string))
 
 
 ; reset testing state when test framework is loaded
@@ -253,7 +255,7 @@
 ;        expected-error)
 
 
-; Statments in the testing DSL.
+; Statements in the testing DSL.
 
 ; The usual or normal test.
 ; <code> is a boolean proposition expected to yield #t
@@ -436,16 +438,36 @@
 
 ; Returns path to file containing named color profile
 ; Currently, assumes color profiles downloaded to /work dir.
-; FUTURE: platform indpendent path
+; FUTURE: platform independent path
 ; FUTURE: color profile test files in the repo
 (define (testing:path-to-color-profile name)
-  (string-append "/work/" name))
+  (string-append "/work/colorProfilesICC/" name))
+
+; Return a new layer in the given image, not inserted.
+; The new layer initial attributes are hard-coded.
+; The new layer is not added i.e. inserted in the image.
+(define (testing:layer-new testImage)
+  (gimp-layer-new
+    testImage
+    "LayerNew"  ; name
+    21 22      ; dimensions
+    RGB-IMAGE   ; mode
+    50.0        ; opacity
+    LAYER-MODE-NORMAL))
+
+; Return a new layer in the given image, inserted.
+; The new layer initial attributes are hard-coded.
+(define (testing:layer-new-inserted testImage)
+  (let ((newLayer (testing:layer-new testImage)))
+    (gimp-image-insert-layer
+            testImage
+            newLayer
+            0 0) ; parent, position within parent
+    newLayer))
 
 
 ; float comparison utility
-
 ; are a and b relatively equal, to within epsilon?
-
 (define (equal-relative? a b epsilon)
   (<= (abs (- a b))
       (* epsilon (max (abs a) (abs b)))))

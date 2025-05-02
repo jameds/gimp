@@ -63,6 +63,7 @@
 #include "gimpgradient.h"
 #include "gimpidtable.h"
 #include "gimpimage.h"
+#include "gimpimage-metadata.h"
 #include "gimpimagefile.h"
 #include "gimplist.h"
 #include "gimpmarshal.h"
@@ -372,8 +373,6 @@ gimp_dispose (GObject *object)
 
   g_clear_object (&gimp->edit_config);
   g_clear_object (&gimp->config);
-
-  gimp_contexts_exit (gimp);
 
   g_clear_object (&gimp->image_new_last_template);
 
@@ -912,6 +911,8 @@ gimp_exit (Gimp     *gimp,
   if (handled)
     return;
 
+  gimp_contexts_exit (gimp);
+
   g_idle_add_full (G_PRIORITY_LOW,
                    (GSourceFunc) gimp_exit_idle_cleanup_stray_images,
                    gimp, NULL);
@@ -1036,11 +1037,16 @@ gimp_create_image (Gimp              *gimp,
                    GimpPrecision      precision,
                    gboolean           attach_comment)
 {
-  GimpImage *image;
+  GimpImage    *image;
+  GimpMetadata *metadata;
 
   g_return_val_if_fail (GIMP_IS_GIMP (gimp), NULL);
 
   image = gimp_image_new (gimp, width, height, type, precision);
+
+  metadata = gimp_metadata_new ();
+  gimp_image_set_metadata (image, metadata, FALSE);
+  g_object_unref (metadata);
 
   if (attach_comment)
     {

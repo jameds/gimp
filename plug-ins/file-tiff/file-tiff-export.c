@@ -327,10 +327,10 @@ save_layer (TIFF        *tif,
 
   g_object_get (config,
                 "gimp-comment",            &config_comment,
-                "save-comment",            &config_save_comment,
+                "include-comment",         &config_save_comment,
                 "save-transparent-pixels", &config_save_transp_pixels,
                 "save-geotiff",            &config_save_geotiff_tags,
-                "save-color-profile",      &config_save_profile,
+                "include-color-profile",   &config_save_profile,
                 "cmyk",                    &config_cmyk,
                 NULL);
 
@@ -669,7 +669,7 @@ save_layer (TIFF        *tif,
     }
 
 #ifdef TIFFTAG_ICCPROFILE
-  if (config_save_profile)
+  if (config_save_profile || config_cmyk)
     {
       const guint8     *icc_data     = NULL;
       gsize             icc_length;
@@ -1064,10 +1064,10 @@ export_image (GFile         *file,
   gboolean          config_cmyk;
 
   g_object_get (config,
-                "bigtiff",            &bigtiff,
-                "save-color-profile", &config_save_profile,
-                "save-thumbnail",     &config_save_thumbnail,
-                "cmyk",               &config_cmyk,
+                "bigtiff",               &bigtiff,
+                "include-color-profile", &config_save_profile,
+                "include-thumbnail",     &config_save_thumbnail,
+                "cmyk",                  &config_cmyk,
                 NULL);
 
   layers = gimp_image_list_layers (image);
@@ -1089,7 +1089,7 @@ export_image (GFile         *file,
       goto out;
     }
 
-  if (config_save_profile)
+  if (config_save_profile || config_cmyk)
     {
       GimpColorProfile *profile;
       GError           *error = NULL;
@@ -1234,22 +1234,22 @@ save_dialog (GimpImage     *image,
              gboolean       is_multi_layer,
              gboolean       classic_tiff_failed)
 {
-  GtkWidget           *dialog;
-  GtkWidget           *profile_label;
-  gchar              **parasites;
-  GimpCompression      compression;
-  gboolean             run;
-  gboolean             has_geotiff  = FALSE;
-  gint                 i;
-  GimpColorProfile    *cmyk_profile = NULL;
-  GParamSpec          *comp_spec;
-  GimpParamSpecChoice *cspec;
+  GtkWidget        *dialog;
+  GtkWidget        *profile_label;
+  gchar           **parasites;
+  GimpCompression   compression;
+  gboolean          run;
+  gboolean          has_geotiff  = FALSE;
+  gint              i;
+  GimpColorProfile *cmyk_profile = NULL;
+  GParamSpec       *cspec;
+  GimpChoice       *choice;
 
-  comp_spec = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "compression");
-  cspec     = GIMP_PARAM_SPEC_CHOICE (comp_spec);
-  gimp_choice_set_sensitive (cspec->choice, "ccittfax3", is_monochrome);
-  gimp_choice_set_sensitive (cspec->choice, "ccittfax4", is_monochrome);
-  gimp_choice_set_sensitive (cspec->choice, "jpeg",      ! is_indexed);
+  cspec  = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "compression");
+  choice = gimp_param_spec_choice_get_choice (cspec);
+  gimp_choice_set_sensitive (choice, "ccittfax3", is_monochrome);
+  gimp_choice_set_sensitive (choice, "ccittfax4", is_monochrome);
+  gimp_choice_set_sensitive (choice, "jpeg",      ! is_indexed);
 
   parasites = gimp_image_get_parasite_list (image);
   for (i = 0; i < g_strv_length (parasites); i++)

@@ -21,7 +21,7 @@ option('check-update',      type: 'combo', value: 'platform-default',
                             choices: [ 'yes', 'no', 'platform-default' ])
 
 option('bug-report-url',    type: 'string',  value: '',   description: 'URL used by the debug dialog to report bugs')
-option('gimpdir',           type: 'string',  value: '',   description: 'Change default gimpdir from ~/.config/GIMP/2.9 to ~/.config/DIR/2.9 (if relative), or to DIR (if absolute)')
+option('gimpdir',           type: 'string',  value: '',   description: 'Change default gimpdir from ~/.config/GIMP/3.0 to ~/.config/DIR/3.0 (if relative), or to DIR (if absolute)')
 option('icc-directory',     type: 'string',  value: '',   description: 'Path to default color profiles for this system')
 option('directx-sdk-dir',   type: 'string',  value: '',   description: 'Prefix where the DirectX SDK is installed(optional)')
 option('with-sendmail',     type: 'string',  value: '',   description: 'Use Sendmail instead of Xdg-email')
@@ -59,7 +59,6 @@ option('file-plug-ins-test', type: 'boolean', value: 'false', description: 'Alwa
 option('can-crosscompile-gir', type: 'boolean', value: false, description: 'GIR is buildable even if crosscompiling')
 
 option('gi-docgen',         type: 'feature', value: 'auto', description: 'Build developer documentation (uses gi-docgen)')
-option('g-ir-doc',          type: 'boolean', value: false,  description: 'Build developer documentation for introspected API')
 
 option('linux-input',       type: 'feature', value: 'auto', description: 'Linux input event controller module')
 option('vector-icons',      type: 'boolean', value: true,   description: 'Use vector icons rather than raster ones')
@@ -67,3 +66,5 @@ option('vector-icons',      type: 'boolean', value: true,   description: 'Use ve
 option('vala',              type: 'feature', value: 'auto', description: 'Build VAPI and Vala plugins')
 option('javascript',        type: 'feature', value: 'auto', description: 'Install Javascript plug-ins')
 option('lua',               type: 'boolean', value: false,  description: 'Install Lua plug-ins (experimental)')
+
+option('debug-self-in-build', type: 'boolean', value: false, description: 'Run in-build GIMP within gdb for debugging purpose')

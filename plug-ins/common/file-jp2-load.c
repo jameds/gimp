@@ -797,8 +797,6 @@ color_cmyk_to_rgb (opj_image_t *image)
       image->comps[2].data[i] = (int) (255.0f * Y * K); /* B */
     }
 
-  free (image->comps[3].data);
-  image->comps[3].data = NULL;
   image->comps[0].prec = 8;
   image->comps[1].prec = 8;
   image->comps[2].prec = 8;
@@ -810,6 +808,10 @@ color_cmyk_to_rgb (opj_image_t *image)
       memcpy(&(image->comps[i]), &(image->comps[i + 1]),
              sizeof (image->comps[i]));
     }
+
+  /* Restore the count so the OpenJPEG destroy function works
+   * properly */
+  image->numcomps += 1;
 
   return TRUE;
 }
@@ -936,11 +938,12 @@ open_dialog (GimpProcedure    *procedure,
              gint              num_components,
              GError          **error)
 {
-  const gchar         *title;
-  GtkWidget           *dialog;
-  gboolean             run;
-  GimpParamSpecChoice *cspec;
-  OPJ_COLOR_SPACE      color_space = OPJ_CLRSPC_SRGB;
+  const gchar     *title;
+  GtkWidget       *dialog;
+  gboolean         run;
+  GParamSpec      *cspec;
+  GimpChoice      *choice;
+  OPJ_COLOR_SPACE  color_space = OPJ_CLRSPC_SRGB;
 
   if (format == OPJ_CODEC_J2K)
     /* Not having color information is expected. */
@@ -955,21 +958,19 @@ open_dialog (GimpProcedure    *procedure,
                                       GIMP_PROCEDURE_CONFIG (config),
                                       _(title));
 
-  cspec =
-    GIMP_PARAM_SPEC_CHOICE (g_object_class_find_property (G_OBJECT_GET_CLASS (config),
-                                                          "colorspace"));
-
+  cspec  = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "colorspace");
+  choice = gimp_param_spec_choice_get_choice (cspec);
 
   if (num_components == 3)
     {
       /* Can be RGB, YUV and YCC. */
-      gimp_choice_set_sensitive (cspec->choice, "grayscale", FALSE);
-      gimp_choice_set_sensitive (cspec->choice, "cmyk", FALSE);
+      gimp_choice_set_sensitive (choice, "grayscale", FALSE);
+      gimp_choice_set_sensitive (choice, "cmyk", FALSE);
     }
   else if (num_components == 4)
     {
       /* Can be RGB, YUV and YCC with alpha or CMYK. */
-      gimp_choice_set_sensitive (cspec->choice, "grayscale", FALSE);
+      gimp_choice_set_sensitive (choice, "grayscale", FALSE);
     }
   else
     {
@@ -984,7 +985,7 @@ open_dialog (GimpProcedure    *procedure,
   if (num_components == 3 || num_components == 4)
     {
       /* By default, RGB is active. */
-      gimp_choice_set_sensitive (cspec->choice, "unknown", FALSE);
+      gimp_choice_set_sensitive (choice, "unknown", FALSE);
       g_object_set (config, "colorspace", "srgb", NULL);
 
       gimp_procedure_dialog_fill (GIMP_PROCEDURE_DIALOG (dialog),
@@ -1213,6 +1214,8 @@ load_image (GimpProcedure     *procedure,
                        gimp_file_get_utf8_name (file));
           goto out;
         }
+
+      num_components--;
     }
   else if (image->color_space == OPJ_CLRSPC_EYCC)
     {

@@ -218,11 +218,12 @@ CODE
 }
 
 sub file_save {
-    $blurb = 'Saves a file by extension.';
+    $blurb = 'Saves to XCF or export @image to any supported format by extension.';
 
     $help = <<'HELP';
-This procedure invokes the correct file save handler according to the
-file's extension and/or prefix.
+This procedure invokes the correct file save/export handler according to
+@file's extension and/or prefix.
+
 
 The @options argument is currently unused and should be set to %NULL
 right now.
@@ -236,7 +237,7 @@ HELP
         { name => 'image', type => 'image',
           desc => 'Input image' },
         { name => 'file', type => 'file',
-          desc => 'The file to save the image in' },
+          desc => 'The file to save or export the image in' },
         { name => 'options', type => 'export_options',
           desc => 'Export option settings' }
     );
@@ -362,16 +363,22 @@ CODE
     );
 }
 
-sub file_save_thumbnail {
-    $blurb = 'Saves a thumbnail for the given image';
+sub file_create_thumbnail {
+    $blurb = 'Creates a thumbnail of @image for the given @file';
 
     $help = <<'HELP';
-This procedure saves a thumbnail for the given image according to the
-Free Desktop Thumbnail Managing Standard. The thumbnail is saved so
-that it belongs to the given file. This means you have to save the image
-under this name first, otherwise this procedure will fail.  This
-procedure may become useful if you want to explicitly save a thumbnail
-with a file.
+This procedure creates a thumbnail for the given @file and stores it
+according to relevant standards.
+
+In particular, it will follow the [Free Desktop Thumbnail Managing
+Standard](https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html)
+when relevant.
+
+
+The thumbnail is stored so that it belongs to the given @file. This
+means you have to save @image under this name first. As a fallback, the
+call will work if @image was exported or imported as @file. In any other
+case, this procedure will fail.
 HELP
 
     &josh_pdb_misc('1997');
@@ -404,13 +411,13 @@ CODE
             file_load_layers
             file_save
             file_load_thumbnail
-            file_save_thumbnail);
+            file_create_thumbnail);
 
 %exports = (app => [@procs], lib => [@procs[0..3,5]]);
 
 $desc = 'File Operations';
 $doc_title = 'gimpfile';
-$doc_short_desc = 'Image file operations (load, save, etc.)';
-$doc_long_desc = 'Image file operations (load, save, etc.)';
+$doc_short_desc = 'Image file operations (load, export, etc.)';
+$doc_long_desc = 'Image file operations (load, export, etc.)';
 
 1;

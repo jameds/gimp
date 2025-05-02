@@ -56,6 +56,18 @@ _gimp_gp_param_def_to_param_spec (const GPParamDef *param_def)
       if (! strcmp (param_def->type_name, "GimpParamDoubleArray"))
         return gimp_param_spec_double_array (name, nick, blurb, flags);
 
+      if (! strcmp (param_def->type_name, "GimpParamValueArray"))
+        /* FIXME: ideally we should add a GP_PARAM_DEF_TYPE_VALUE_ARRAY
+         * def type which should recursively contain another
+         * GPParamDefType so that we'd recreate the spec as it was
+         * initially created (limiting the array to specific types,
+         * possibly further limited).
+         * For now, we just create a value array which accepts
+         * everything.
+         */
+        return gimp_param_spec_value_array (name, nick, blurb,
+                                            NULL, flags);
+
       if (! strcmp (param_def->type_name, "GimpParamParasite"))
         return gimp_param_spec_parasite (name, nick, blurb, flags);
 
@@ -328,6 +340,25 @@ _gimp_gp_param_def_to_param_spec (const GPParamDef *param_def)
                                          flags);
 
       break;
+
+    case GP_PARAM_DEF_TYPE_FILE:
+      if (! strcmp (param_def->type_name, "GimpParamFile"))
+        {
+          GFile      *file = NULL;
+          GParamSpec *pspec;
+
+          if (param_def->meta.m_file.default_uri &&
+              strlen (param_def->meta.m_file.default_uri) > 0)
+            file  = g_file_new_for_uri (param_def->meta.m_file.default_uri);
+
+          pspec = gimp_param_spec_file (name, nick, blurb,
+                                        (GimpFileChooserAction) param_def->meta.m_file.action,
+                                        param_def->meta.m_file.none_ok,
+                                        file, flags);
+          g_clear_object (&file);
+          return pspec;
+        }
+      break;
     }
 
   g_warning ("%s: GParamSpec type unsupported '%s'", G_STRFUNC,
@@ -398,13 +429,15 @@ _gimp_param_spec_to_gp_param_def (GParamSpec *pspec,
     }
   else if (pspec_type == GIMP_TYPE_PARAM_UNIT)
     {
-      GimpParamSpecUnit *uspec = GIMP_PARAM_SPEC_UNIT (pspec);
+      GObject *default_value;
+
+      default_value = gimp_param_spec_object_get_default (pspec);
 
       param_def->param_def_type = GP_PARAM_DEF_TYPE_UNIT;
 
-      param_def->meta.m_unit.allow_pixels  = uspec->allow_pixel;
-      param_def->meta.m_unit.allow_percent = uspec->allow_percent;
-      param_def->meta.m_unit.default_val   = gimp_unit_get_id (uspec->default_value);
+      param_def->meta.m_unit.allow_pixels  = gimp_param_spec_unit_pixel_allowed (pspec);
+      param_def->meta.m_unit.allow_percent = gimp_param_spec_unit_percent_allowed (pspec);
+      param_def->meta.m_unit.default_val   = gimp_unit_get_id (GIMP_UNIT (default_value));
     }
 #ifndef LIBGIMP_COMPILATION
   /* This trick is only for core side when it needs to send the param
@@ -504,13 +537,12 @@ _gimp_param_spec_to_gp_param_def (GParamSpec *pspec,
   /* Must be before G_IS_PARAM_SPEC_STRING() because it's a parent. */
   else if (pspec_type == GIMP_TYPE_PARAM_CHOICE)
     {
-      GimpParamSpecChoice *cspec = GIMP_PARAM_SPEC_CHOICE (pspec);
-      GParamSpecString    *sspec = G_PARAM_SPEC_STRING (pspec);
+      GParamSpecString *sspec = G_PARAM_SPEC_STRING (pspec);
 
       param_def->param_def_type = GP_PARAM_DEF_TYPE_CHOICE;
 
       param_def->meta.m_choice.default_val = sspec->default_value;
-      param_def->meta.m_choice.choice      = cspec->choice;
+      param_def->meta.m_choice.choice      = gimp_param_spec_choice_get_choice (pspec);
     }
   else if (G_IS_PARAM_SPEC_STRING (pspec) &&
 #ifdef LIBGIMP_COMPILATION
@@ -588,59 +620,63 @@ _gimp_param_spec_to_gp_param_def (GParamSpec *pspec,
     }
   else if (pspec_type == GIMP_TYPE_PARAM_IMAGE)
     {
-      GimpParamSpecImage *ispec = GIMP_PARAM_SPEC_IMAGE (pspec);
-
       param_def->param_def_type = GP_PARAM_DEF_TYPE_ID;
 
-      param_def->meta.m_id.none_ok = ispec->none_ok;
+      param_def->meta.m_id.none_ok = gimp_param_spec_image_none_allowed (pspec);
     }
   else if (GIMP_IS_PARAM_SPEC_ITEM (pspec))
     {
-      GimpParamSpecItem *ispec = GIMP_PARAM_SPEC_ITEM (pspec);
-
       param_def->param_def_type = GP_PARAM_DEF_TYPE_ID;
 
-      param_def->meta.m_id.none_ok = ispec->none_ok;
+      param_def->meta.m_id.none_ok = gimp_param_spec_item_none_allowed (pspec);
     }
   else if (GIMP_IS_PARAM_SPEC_DRAWABLE_FILTER (pspec))
     {
-      GimpParamSpecDrawableFilter *fspec = GIMP_PARAM_SPEC_DRAWABLE_FILTER (pspec);
-
       param_def->param_def_type = GP_PARAM_DEF_TYPE_ID;
 
-      param_def->meta.m_id.none_ok = fspec->none_ok;
+      param_def->meta.m_id.none_ok = gimp_param_spec_drawable_filter_none_allowed (pspec);
     }
   else if (pspec_type == GIMP_TYPE_PARAM_DISPLAY)
     {
-      GimpParamSpecDisplay *ispec = GIMP_PARAM_SPEC_DISPLAY (pspec);
-
       param_def->param_def_type = GP_PARAM_DEF_TYPE_ID;
 
-      param_def->meta.m_id.none_ok = ispec->none_ok;
+      param_def->meta.m_id.none_ok = gimp_param_spec_display_none_allowed (pspec);
     }
   else if (GIMP_IS_PARAM_SPEC_RESOURCE (pspec))
     {
-      GimpParamSpecResource *rspec         = GIMP_PARAM_SPEC_RESOURCE (pspec);
-      GObject               *default_value = NULL;
+      GObject  *default_value = NULL;
+      gboolean  default_to_context;
 
       param_def->param_def_type = GP_PARAM_DEF_TYPE_RESOURCE;
 
       if (gimp_param_spec_object_has_default (pspec))
         default_value = gimp_param_spec_object_get_default (pspec);
 
-      param_def->meta.m_resource.none_ok = rspec->none_ok;
-      param_def->meta.m_resource.default_to_context = rspec->default_to_context;
-      if (default_value != NULL && ! rspec->default_to_context)
+      param_def->meta.m_resource.none_ok = gimp_param_spec_resource_none_allowed (pspec);
+      default_to_context = gimp_param_spec_resource_defaults_to_context (pspec);
+      param_def->meta.m_resource.default_to_context = default_to_context;
+      if (default_value != NULL && ! default_to_context)
         param_def->meta.m_resource.default_resource_id = get_resource_id (default_value);
       else
         param_def->meta.m_resource.default_resource_id = 0;
+    }
+  else if (pspec_type == GIMP_TYPE_PARAM_FILE)
+    {
+      GimpParamSpecObject *ospec = GIMP_PARAM_SPEC_OBJECT (pspec);
+
+      param_def->param_def_type = GP_PARAM_DEF_TYPE_FILE;
+
+      param_def->meta.m_file.action      = (gint32) gimp_param_spec_file_get_action (pspec);
+      param_def->meta.m_file.none_ok     = gimp_param_spec_file_none_allowed (pspec);
+      param_def->meta.m_file.default_uri =
+        ospec->_default_value ?  g_file_get_uri (G_FILE (ospec->_default_value)) : NULL;
     }
   else if (GIMP_IS_PARAM_SPEC_CORE_OBJECT_ARRAY (pspec))
     {
       param_def->param_def_type = GP_PARAM_DEF_TYPE_ID_ARRAY;
 
       param_def->meta.m_id_array.type_name =
-        (gchar *) g_type_name (GIMP_PARAM_SPEC_CORE_OBJECT_ARRAY (pspec)->object_type);
+        (gchar *) g_type_name (gimp_param_spec_core_object_array_get_object_type (pspec));
     }
   else if (pspec_type == GIMP_TYPE_PARAM_EXPORT_OPTIONS)
     {
@@ -1045,7 +1081,7 @@ gimp_gp_param_to_value (gpointer        gimp,
         }
       else if (pspec != NULL)
         {
-          object_type = GIMP_PARAM_SPEC_CORE_OBJECT_ARRAY (pspec)->object_type;
+          object_type = gimp_param_spec_core_object_array_get_object_type (pspec);
         }
 
       if (param->data.d_id_array.size > 1 && ! g_type_is_a (object_type, G_TYPE_OBJECT))

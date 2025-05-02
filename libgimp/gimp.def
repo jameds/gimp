@@ -314,6 +314,7 @@ EXPORTS
 	gimp_export_procedure_set_support_xmp
 	gimp_export_thumbnail
 	gimp_export_xmp
+	gimp_file_create_thumbnail
 	gimp_file_load
 	gimp_file_load_layer
 	gimp_file_load_layers
@@ -333,7 +334,6 @@ EXPORTS
 	gimp_file_procedure_set_prefixes
 	gimp_file_procedure_set_priority
 	gimp_file_save
-	gimp_file_save_thumbnail
 	gimp_floating_sel_anchor
 	gimp_floating_sel_attach
 	gimp_floating_sel_remove
@@ -408,6 +408,8 @@ EXPORTS
 	gimp_image_add_sample_point
 	gimp_image_add_vguide
 	gimp_image_attach_parasite
+	gimp_image_autocrop
+	gimp_image_autocrop_selected_layers
 	gimp_image_clean_all
 	gimp_image_convert_color_profile
 	gimp_image_convert_color_profile_from_file
@@ -722,20 +724,26 @@ EXPORTS
 	gimp_param_spec_brush
 	gimp_param_spec_channel
 	gimp_param_spec_display
+	gimp_param_spec_display_none_allowed
 	gimp_param_spec_drawable
 	gimp_param_spec_drawable_filter
+	gimp_param_spec_drawable_filter_none_allowed
 	gimp_param_spec_font
 	gimp_param_spec_get_desc
 	gimp_param_spec_gradient
 	gimp_param_spec_group_layer
 	gimp_param_spec_image
+	gimp_param_spec_image_none_allowed
 	gimp_param_spec_item
+	gimp_param_spec_item_none_allowed
 	gimp_param_spec_layer
 	gimp_param_spec_layer_mask
 	gimp_param_spec_palette
 	gimp_param_spec_path
 	gimp_param_spec_pattern
 	gimp_param_spec_resource
+	gimp_param_spec_resource_defaults_to_context
+	gimp_param_spec_resource_none_allowed
 	gimp_param_spec_selection
 	gimp_param_spec_text_layer
 	gimp_param_text_layer_get_type
@@ -938,6 +946,7 @@ EXPORTS
 	gimp_procedure_get_return_values
 	gimp_procedure_get_sensitivity_mask
 	gimp_procedure_get_type
+	gimp_procedure_is_internal
 	gimp_procedure_new
 	gimp_procedure_new_return_values
 	gimp_procedure_persistent_ready

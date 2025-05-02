@@ -34,6 +34,7 @@
 #include "gimppdb-private.h"
 #include "gimpplugin-private.h"
 #include "gimppdb_pdb.h"
+#include "gimppdbprocedure.h"
 #include "gimpplugin-private.h"
 #include "gimpplugin_pdb.h"
 #include "gimpprocedureconfig-private.h"
@@ -208,6 +209,8 @@ gimp_procedure_constructed (GObject *object)
 
   g_assert (GIMP_IS_PLUG_IN (priv->plug_in));
   g_assert (priv->name != NULL);
+
+  gimp_procedure_set_sensitivity_mask (procedure, GIMP_PROCEDURE_SENSITIVE_ALWAYS);
 }
 
 static void
@@ -745,7 +748,7 @@ gimp_procedure_get_proc_type (GimpProcedure *procedure)
  *
  * This is a comma separated list of image types, or actually drawable
  * types, that this procedure can deal with. Wildcards are possible
- * here, so you could say "RGB*" instead of "RGB, RGBA" or "*" for all
+ * here, so you could say "RGB\*" instead of "RGB, RGBA" or "\*" for all
  * image types.
  *
  * Supported types are "RGB", "GRAY", "INDEXED" and their variants
@@ -797,9 +800,10 @@ gimp_procedure_get_image_types (GimpProcedure *procedure)
 /**
  * gimp_procedure_set_sensitivity_mask:
  * @procedure:        A #GimpProcedure.
- * @sensitivity_mask: A binary mask of #GimpProcedureSensitivityMask.
+ * @sensitivity_mask: A binary mask of [flags@Gimp.ProcedureSensitivityMask].
  *
- * Sets the case when @procedure is supposed to be sensitive or not.
+ * Sets the cases when @procedure is supposed to be sensitive or not.
+ *
  * Note that it will be used by the core to determine whether to show a
  * procedure as sensitive (hence forbid running it otherwise), yet it
  * will not forbid thid-party plug-ins for instance to run manually your
@@ -811,10 +815,10 @@ gimp_procedure_get_image_types (GimpProcedure *procedure)
  * a procedure with [method@Procedure.get_sensitivity_mask] when running
  * with dynamic contents.
  *
- * Note that by default, a procedure works on an image with a single
- * drawable selected. Hence not setting the mask, setting it with 0 or
- * setting it with a mask of %GIMP_PROCEDURE_SENSITIVE_DRAWABLE only are
- * equivalent.
+ * Note that by default, a procedure works on an image with one or more
+ * drawables selected. Hence not setting the mask, setting it with 0 or
+ * setting it with `GIMP_PROCEDURE_SENSITIVE_DRAWABLE |
+ * GIMP_PROCEDURE_SENSITIVE_DRAWABLES` are equivalent.
  *
  * Since: 3.0
  **/
@@ -2227,6 +2231,35 @@ gimp_procedure_create_config (GimpProcedure *procedure)
                                                    "GimpProcedureConfig",
                                                    priv->args,
                                                    priv->n_args);
+}
+
+/**
+ * gimp_procedure_is_internal:
+ * @procedure: A #GimpProcedure
+ *
+ * Provide the information if @procedure is an internal procedure. Only
+ * a procedure looked up in the [class@Gimp.PDB] can be internal.
+ * Procedures created by a plug-in in particular are never internal.
+ *
+ * Returns: Whether @procedure is an internal procedure or not.
+ *
+ * Since: 3.0
+ **/
+gboolean
+gimp_procedure_is_internal (GimpProcedure *procedure)
+{
+  g_return_val_if_fail (GIMP_IS_PROCEDURE (procedure), FALSE);
+
+  if (GIMP_IS_PDB_PROCEDURE (procedure))
+    {
+      GimpProcedurePrivate *priv = gimp_procedure_get_instance_private (procedure);
+
+      return (priv->proc_type == GIMP_PDB_PROC_TYPE_INTERNAL);
+    }
+  else
+    {
+      return FALSE;
+    }
 }
 
 /**

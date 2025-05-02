@@ -175,7 +175,7 @@ gimp_pdb_lookup_procedure (GimpPDB     *pdb,
   procedure = g_hash_table_lookup (pdb->procedures, procedure_name);
 
   if (! procedure && gimp_is_canonical_identifier (procedure_name) &&
-      gimp_pdb_procedure_exists (pdb, procedure_name))
+      _gimp_pdb_proc_exists (procedure_name))
     {
       procedure = _gimp_pdb_procedure_new (pdb, procedure_name);
 
@@ -300,8 +300,6 @@ _gimp_pdb_error_quark (void)
   return g_quark_from_static_string ("gimp-pdb-error-quark");
 }
 
-
-/*  Temporary API, to go away before 3.0  */
 
 /**
  * gimp_pdb_get_last_error:

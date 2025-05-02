@@ -48,6 +48,12 @@
 #include "core/gimpsettings.h"
 #include "core/gimptoolinfo.h"
 
+#include "widgets/gimpaction.h"
+#include "widgets/gimpactiongroup.h"
+#include "widgets/gimphelp-ids.h"
+#include "widgets/gimpstringaction.h"
+#include "widgets/gimpuimanager.h"
+
 #include "tools/gimpoperationtool.h"
 #include "tools/tool_manager.h"
 
@@ -64,6 +70,7 @@ static gint64   gimp_gegl_procedure_get_memsize         (GimpObject     *object,
 static gchar  * gimp_gegl_procedure_get_description     (GimpViewable   *viewable,
                                                          gchar         **tooltip);
 
+static const gchar * gimp_gegl_procedure_get_help_id    (GimpProcedure  *procedure);
 static const gchar * gimp_gegl_procedure_get_menu_label (GimpProcedure  *procedure);
 static gboolean      gimp_gegl_procedure_get_sensitive  (GimpProcedure  *procedure,
                                                          GimpObject     *object,
@@ -103,6 +110,7 @@ gimp_gegl_procedure_class_init (GimpGeglProcedureClass *klass)
   viewable_class->default_icon_name = "gimp-gegl";
   viewable_class->get_description   = gimp_gegl_procedure_get_description;
 
+  proc_class->get_help_id           = gimp_gegl_procedure_get_help_id;
   proc_class->get_menu_label        = gimp_gegl_procedure_get_menu_label;
   proc_class->get_sensitive         = gimp_gegl_procedure_get_sensitive;
   proc_class->execute               = gimp_gegl_procedure_execute;
@@ -151,6 +159,41 @@ gimp_gegl_procedure_get_description (GimpViewable  *viewable,
     *tooltip = g_strdup (gimp_procedure_get_blurb (procedure));
 
   return g_strdup (gimp_procedure_get_label (procedure));
+}
+
+static const gchar *
+gimp_gegl_procedure_get_help_id (GimpProcedure *procedure)
+{
+  GimpGeglProcedure *proc = GIMP_GEGL_PROCEDURE (procedure);
+  GList             *managers;
+  GimpActionGroup   *group;
+  const gchar       *help_id = NULL;
+
+  managers = gimp_ui_managers_from_name ("<Image>");
+  group    = gimp_ui_manager_get_action_group (managers->data, "filters");
+
+  if (procedure->help_id)
+    {
+      return procedure->help_id;
+    }
+  else if (group)
+    {
+      GList *actions;
+      GList *iter;
+
+      actions = gimp_action_group_list_actions (group);
+      for (iter = actions; iter; iter = iter->next)
+        if (GIMP_IS_STRING_ACTION (iter->data) &&
+            g_strcmp0 (GIMP_STRING_ACTION (iter->data)->value, proc->operation) == 0)
+          {
+            help_id = gimp_action_get_help_id (iter->data);
+            break;
+          }
+
+      g_list_free (actions);
+    }
+
+  return help_id == NULL ? GIMP_HELP_TOOL_GEGL : help_id;
 }
 
 static const gchar *

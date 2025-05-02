@@ -69,17 +69,28 @@ test_scripts = [
   'tests' / 'PDB' / 'edit' / 'buffer.scm',
   'tests' / 'PDB' / 'edit' / 'edit.scm',
   'tests' / 'PDB' / 'edit' / 'edit-multi-layer.scm',
+  'tests' / 'PDB' / 'edit' / 'edit-cut.scm',
+  # this is on old test script, that crashes GIMP
+  # if the crash is fixed, don't install this script
+  'tests' / 'PDB' / 'edit' / 'edit-crash.scm',
+
+  'tests' / 'PDB' / 'file' / 'file.scm',
+  'tests' / 'PDB' / 'file' / 'file-export.scm',
 
   'tests' / 'PDB' / 'gimp' / 'gimp.scm',
   'tests' / 'PDB' / 'gimp' / 'PDB.scm',
   'tests' / 'PDB' / 'gimp' / 'refresh.scm',
   'tests' / 'PDB' / 'gimp' / 'procedures.scm',
 
+  'tests' / 'PDB' / 'filter' / 'filter.scm',
+  'tests' / 'PDB' / 'filter' / 'filter-ops.scm',
+
   # uncategorized tests
   'tests' / 'PDB' / 'misc.scm',
   'tests' / 'PDB' / 'enums.scm',
   'tests' / 'PDB' / 'bind-args.scm',
   'tests' / 'PDB' / 'pixel.scm',
+  'tests' / 'PDB' / 'named-args.scm',
 
   # comprehensive, total test
   'tests' / 'PDB' / 'pdb.scm',
@@ -112,7 +123,7 @@ test_scripts = [
 ]
 
 # Install test framework to shared /scripts
-# Assert: SFConsole, SFExtension, and standalong SFInterpreter will read them.
+# Assert: SFConsole, SFExtension, and standalone SFInterpreter will read them.
 # SFConsole is primary testing interface.
 # Some plugins in /scripts (SFExtension)
 # and in /plug-ins (SFInterpreter) may also be interface for testing.

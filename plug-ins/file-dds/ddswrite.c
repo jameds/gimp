@@ -99,7 +99,7 @@ static struct
 {
   { DDS_FORMAT_RGB8,    DXGI_FORMAT_UNKNOWN,           3, FALSE, 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000},
   { DDS_FORMAT_RGBA8,   DXGI_FORMAT_B8G8R8A8_UNORM,    4, TRUE,  0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000},
-  { DDS_FORMAT_BGR8,    DXGI_FORMAT_UNKNOWN,           3, FALSE, 0x000000ff, 0x0000ff00, 0x00ff0000, 0x00000000},
+  { DDS_FORMAT_BGR8,    DXGI_FORMAT_UNKNOWN,           4, FALSE, 0x000000ff, 0x0000ff00, 0x00ff0000, 0x00000000},
   { DDS_FORMAT_ABGR8,   DXGI_FORMAT_R8G8B8A8_UNORM,    4, TRUE,  0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000},
   { DDS_FORMAT_R5G6B5,  DXGI_FORMAT_B5G6R5_UNORM,      2, FALSE, 0x0000f800, 0x000007e0, 0x0000001f, 0x00000000},
   { DDS_FORMAT_RGBA4,   DXGI_FORMAT_B4G4R4A4_UNORM,    2, TRUE,  0x00000f00, 0x000000f0, 0x0000000f, 0x0000f000},
@@ -107,8 +107,8 @@ static struct
   { DDS_FORMAT_RGB10A2, DXGI_FORMAT_R10G10B10A2_UNORM, 4, TRUE,  0x000003ff, 0x000ffc00, 0x3ff00000, 0xc0000000},
   { DDS_FORMAT_R3G3B2,  DXGI_FORMAT_UNKNOWN,           1, FALSE, 0x000000e0, 0x0000001c, 0x00000003, 0x00000000},
   { DDS_FORMAT_A8,      DXGI_FORMAT_A8_UNORM,          1, FALSE, 0x00000000, 0x00000000, 0x00000000, 0x000000ff},
-  { DDS_FORMAT_L8,      DXGI_FORMAT_R8_UNORM,          1, FALSE, 0x000000ff, 0x000000ff, 0x000000ff, 0x00000000},
-  { DDS_FORMAT_L8A8,    DXGI_FORMAT_UNKNOWN,           2, TRUE,  0x000000ff, 0x000000ff, 0x000000ff, 0x0000ff00},
+  { DDS_FORMAT_L8,      DXGI_FORMAT_R8_UNORM,          1, FALSE, 0x000000ff, 0x00000000, 0x00000000, 0x00000000},
+  { DDS_FORMAT_L8A8,    DXGI_FORMAT_UNKNOWN,           2, TRUE,  0x000000ff, 0x00000000, 0x00000000, 0x0000ff00},
   { DDS_FORMAT_AEXP,    DXGI_FORMAT_B8G8R8A8_UNORM,    4, TRUE,  0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000},
   { DDS_FORMAT_YCOCG,   DXGI_FORMAT_B8G8R8A8_UNORM,    4, TRUE,  0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000}
 };
@@ -204,8 +204,7 @@ check_mipmaps (gint savetype)
 static gboolean
 check_cubemap (GimpImage *image)
 {
-  GList         *layers;
-  GList         *list;
+  GimpLayer    **layers;
   gint           num_layers;
   gboolean       cubemap = TRUE;
   gint           i, j, k;
@@ -213,11 +212,14 @@ check_cubemap (GimpImage *image)
   gchar         *layer_name;
   GimpImageType  type;
 
-  layers = gimp_image_list_layers (image);
-  num_layers = g_list_length (layers);
+  layers     = gimp_image_get_layers (image);
+  num_layers = gimp_core_object_array_get_length ((GObject **) layers);
 
   if (num_layers < 6)
-    return FALSE;
+    {
+      g_free (layers);
+      return FALSE;
+    }
 
   /* Check for a valid cubemap with mipmap layers */
   if (num_layers > 6)
@@ -234,11 +236,9 @@ check_cubemap (GimpImage *image)
       w = gimp_image_get_width (image);
       h = gimp_image_get_height (image);
 
-      for (i = 0, list = layers;
-           i < num_layers;
-           ++i, list = g_list_next (list))
+      for (i = 0; i < num_layers; ++i)
         {
-          GimpDrawable *drawable = list->data;
+          GimpDrawable *drawable = GIMP_DRAWABLE (layers[i]);
 
           if ((gimp_drawable_get_width  (drawable) != w) ||
               (gimp_drawable_get_height (drawable) != h))
@@ -289,13 +289,9 @@ check_cubemap (GimpImage *image)
       for (i = 0; i < 6; ++i)
         cubemap_faces[i] = NULL;
 
-      for (i = 0, list = layers;
-           i < 6;
-           ++i, list = g_list_next (layers))
+      for (i = 0; i < num_layers; ++i)
         {
-          GimpLayer *layer = list->data;
-
-          layer_name = (gchar *) gimp_item_get_name (GIMP_ITEM (layer));
+          layer_name = (gchar *) gimp_item_get_name (GIMP_ITEM (layers[i]));
 
           for (j = 0; j < 6; ++j)
             {
@@ -305,7 +301,7 @@ check_cubemap (GimpImage *image)
                     {
                       if (cubemap_faces[j] == NULL)
                         {
-                          cubemap_faces[j] = layer;
+                          cubemap_faces[j] = layers[i];
                           break;
                         }
                     }
@@ -348,6 +344,7 @@ check_cubemap (GimpImage *image)
             }
         }
     }
+  g_free (layers);
 
   return cubemap;
 }
@@ -675,9 +672,10 @@ convert_pixels (guchar *dst,
           dst[4 * i + 3] = a;
           break;
         case DDS_FORMAT_BGR8:
-          dst[3 * i + 0] = r;
-          dst[3 * i + 1] = g;
-          dst[3 * i + 2] = b;
+          dst[4 * i + 0] = r;
+          dst[4 * i + 1] = g;
+          dst[4 * i + 2] = b;
+          dst[4 * i + 3] = 0;
           break;
         case DDS_FORMAT_ABGR8:
           dst[4 * i + 0] = r;
@@ -1402,8 +1400,8 @@ write_image (FILE                *fp,
           fmtbpp = 2;
           has_alpha = TRUE;
           rmask = 0x000000ff;
-          gmask = 0x000000ff;
-          bmask = 0x000000ff;
+          gmask = 0x00000000;
+          bmask = 0x00000000;
           amask = 0x0000ff00;
         }
     }
@@ -1499,16 +1497,12 @@ write_image (FILE                *fp,
         }
       else
         {
-          if (bpp == 1)
+          if (bpp == 1 || bpp == 2)
             {
               if (basetype == GIMP_INDEXED)
                 pflags |= DDPF_PALETTEINDEXED8;
               else
                 pflags |= DDPF_LUMINANCE;
-            }
-          else if ((bpp == 2) && (basetype == GIMP_INDEXED))
-            {
-              pflags |= DDPF_PALETTEINDEXED8;
             }
           else
             {
@@ -1681,7 +1675,7 @@ write_image (FILE                *fp,
     {
       for (i = 0, list = layers;
            i < num_layers;
-           ++i, list = g_list_next (layers))
+           ++i, list = g_list_next (list))
         {
           write_layer (fp, image, list->data, config,
                        w, h, bpp, fmtbpp, 1);
@@ -1696,7 +1690,7 @@ write_image (FILE                *fp,
     {
       for (i = 0, list = layers;
            i < num_layers;
-           ++i, list = g_list_next (layers))
+           ++i, list = g_list_next (list))
         {
           if ((gimp_drawable_get_width  (list->data) == w) &&
               (gimp_drawable_get_height (list->data) == h))
@@ -1747,8 +1741,9 @@ config_notify (GimpProcedureConfig *config,
     }
   else if (! strcmp (pspec->name, "save-type"))
     {
-      gint                 savetype;
-      GimpParamSpecChoice *pspec;
+      GParamSpec *cspec;
+      GimpChoice *choice;
+      gint        savetype;
 
       savetype = gimp_procedure_config_get_choice_id (config, "save-type");
 
@@ -1773,9 +1768,9 @@ config_notify (GimpProcedureConfig *config,
           break;
         }
 
-      pspec = GIMP_PARAM_SPEC_CHOICE (g_object_class_find_property (G_OBJECT_GET_CLASS (config),
-                                                                    "mipmaps"));
-      gimp_choice_set_sensitive (pspec->choice, "existing", check_mipmaps (savetype));
+      cspec  = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "mipmaps");
+      choice = gimp_param_spec_choice_get_choice (cspec);
+      gimp_choice_set_sensitive (choice, "existing", check_mipmaps (savetype));
     }
   else if (! strcmp (pspec->name, "mipmaps"))
     {
@@ -1905,10 +1900,11 @@ save_dialog (GimpImage           *image,
              GimpProcedure       *procedure,
              GimpProcedureConfig *config)
 {
-  GtkWidget           *dialog;
-  GimpParamSpecChoice *cspec;
-  GimpImageBaseType    base_type;
-  gboolean             run;
+  GtkWidget         *dialog;
+  GParamSpec        *cspec;
+  GimpChoice        *choice;
+  GimpImageBaseType  base_type;
+  gboolean           run;
 
   base_type = gimp_image_get_base_type (image);
 
@@ -1955,17 +1951,17 @@ save_dialog (GimpImage           *image,
 
   gimp_procedure_dialog_get_widget (GIMP_PROCEDURE_DIALOG (dialog),
                                     "save-type", G_TYPE_NONE);
-  cspec = GIMP_PARAM_SPEC_CHOICE (g_object_class_find_property (G_OBJECT_GET_CLASS (config),
-                                                                "save-type"));
-  gimp_choice_set_sensitive (cspec->choice, "cube",   is_cubemap);
-  gimp_choice_set_sensitive (cspec->choice, "volume", is_volume);
-  gimp_choice_set_sensitive (cspec->choice, "array",  is_array);
+  cspec  = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "save-type");
+  choice = gimp_param_spec_choice_get_choice (cspec);
+  gimp_choice_set_sensitive (choice, "cube",   is_cubemap);
+  gimp_choice_set_sensitive (choice, "volume", is_volume);
+  gimp_choice_set_sensitive (choice, "array",  is_array);
 
   gimp_procedure_dialog_get_widget (GIMP_PROCEDURE_DIALOG (dialog),
                                     "mipmaps", G_TYPE_NONE);
-  cspec = GIMP_PARAM_SPEC_CHOICE (g_object_class_find_property (G_OBJECT_GET_CLASS (config),
-                                                                "mipmaps"));
-  gimp_choice_set_sensitive (cspec->choice, "existing",
+  cspec  = g_object_class_find_property (G_OBJECT_GET_CLASS (config), "mipmaps");
+  choice = gimp_param_spec_choice_get_choice (cspec);
+  gimp_choice_set_sensitive (choice, "existing",
                              ! (is_volume || is_cubemap) && is_mipmap_chain_valid);
 
   gimp_procedure_dialog_fill (GIMP_PROCEDURE_DIALOG (dialog),

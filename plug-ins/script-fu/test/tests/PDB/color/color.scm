@@ -93,8 +93,8 @@
                   '(255)))
 
 ; a color from a grayscale with alpha image is a list of one
-; For gimp-logo.png the backround is 0 i.e. black
-; For wilber.png the backround is 71 some intermediate gray
+; For gimp-logo.png the background is 0 i.e. black
+; For wilber.png the background is 71 some intermediate gray
 ; FIXME, why do two images rgba converted to gray and flattened
 ; have different values for a total transparent pixel?
 (assert `(equal? (gimp-drawable-get-pixel ,testDrawableGrayA 1 1)
@@ -107,8 +107,10 @@
 ; Note the rgb is black 0,0,0 , same as before conversion to indexed.
 ; Note the image still has an alpha and pixel 1,1 is transparent
 (assert `(equal? (gimp-drawable-get-pixel ,testDrawableIndexed 1 1)
-                 '(139 127 114 0)))
-; FIXME: strange behavior, should be, and sometimes is, '(0 0 0 0)))
+                 '(0 0 0 0)))
+; FIXME: strange behavior:
+; sometimes '(139 127 114 0)))
+; sometimes '(0 0 0 0)))
 
 (display (gimp-drawable-get-pixel testDrawableIndexed 1 1))
 
@@ -216,7 +218,7 @@
 
 
 (test! "Extra components in colors")
-; lenth 5, only 4 components used
+; length 5, only 4 components used
 (assert `(gimp-context-set-background '(0 0 0 0 5)))
 
 

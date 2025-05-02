@@ -9,15 +9,22 @@ BasedOnStyle: GNU
 
 AlignAfterOpenBracket: Align
 AlignArrayOfStructures: Left
-AlignConsecutiveAssignments: Consecutive
-AlignConsecutiveDeclarations: Consecutive
-AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: AcrossComments
+AlignConsecutiveDeclarations: AcrossComments
+AlignConsecutiveBitFields: AcrossComments
+AlignConsecutiveMacros: AcrossComments
 AlignEscapedNewlines: Left
 
+AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AlwaysBreakAfterReturnType: AllDefinitions
-BinPackParameters: false
+BinPackArguments: true
+# Uncomment when our CI uses LLVM 20.
+# See: https://github.com/llvm/llvm-project/issues/117830
+# BinPackParameters: AlwaysOnePerLine
+BreakBeforeBinaryOperators: None
 BreakBeforeBraces: GNU
+BreakBeforeTernaryOperators: false
 IndentWidth: 2
 PointerAlignment: Right
 UseTab: Never

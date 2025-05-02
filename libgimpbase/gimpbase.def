@@ -62,6 +62,7 @@ EXPORTS
 	gimp_escape_uline
 	gimp_export_capabilities_get_type
 	gimp_export_options_get_type
+	gimp_file_chooser_action_get_type
 	gimp_file_get_utf8_name
 	gimp_file_has_extension
 	gimp_file_show_in_file_manager
@@ -116,6 +117,7 @@ EXPORTS
 	gimp_metadata_serialize
 	gimp_metadata_set_bits_per_sample
 	gimp_metadata_set_colorspace
+	gimp_metadata_set_creation_date
 	gimp_metadata_set_from_exif
 	gimp_metadata_set_from_iptc
 	gimp_metadata_set_from_xmp
@@ -131,15 +133,23 @@ EXPORTS
 	gimp_param_core_object_array_get_type
 	gimp_param_double_array_get_type
 	gimp_param_export_options_get_type
+	gimp_param_file_get_type
 	gimp_param_int32_array_get_type
 	gimp_param_memsize_get_type
 	gimp_param_object_get_type
 	gimp_param_parasite_get_type
 	gimp_param_spec_array
 	gimp_param_spec_choice
+	gimp_param_spec_choice_get_choice
+	gimp_param_spec_choice_get_default
 	gimp_param_spec_core_object_array
+	gimp_param_spec_core_object_array_get_object_type
 	gimp_param_spec_double_array
 	gimp_param_spec_export_options
+	gimp_param_spec_file
+	gimp_param_spec_file_get_action
+	gimp_param_spec_file_none_allowed
+	gimp_param_spec_file_set_action
 	gimp_param_spec_int32_array
 	gimp_param_spec_memsize
 	gimp_param_spec_object_duplicate
@@ -148,7 +158,10 @@ EXPORTS
 	gimp_param_spec_object_set_default
 	gimp_param_spec_parasite
 	gimp_param_spec_unit
+	gimp_param_spec_unit_percent_allowed
+	gimp_param_spec_unit_pixel_allowed
 	gimp_param_spec_value_array
+	gimp_param_spec_value_array_get_element_spec
 	gimp_param_unit_get_type
 	gimp_param_value_array_get_type
 	gimp_parasite_compare

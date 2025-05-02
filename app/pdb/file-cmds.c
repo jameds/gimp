@@ -338,12 +338,12 @@ file_load_thumbnail_invoker (GimpProcedure         *procedure,
 }
 
 static GimpValueArray *
-file_save_thumbnail_invoker (GimpProcedure         *procedure,
-                             Gimp                  *gimp,
-                             GimpContext           *context,
-                             GimpProgress          *progress,
-                             const GimpValueArray  *args,
-                             GError               **error)
+file_create_thumbnail_invoker (GimpProcedure         *procedure,
+                               Gimp                  *gimp,
+                               GimpContext           *context,
+                               GimpProgress          *progress,
+                               const GimpValueArray  *args,
+                               GError               **error)
 {
   gboolean success = TRUE;
   GimpImage *image;
@@ -369,7 +369,7 @@ register_file_procs (GimpPDB *pdb)
   /*
    * gimp-file-load
    */
-  procedure = gimp_procedure_new (file_load_invoker);
+  procedure = gimp_procedure_new (file_load_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-file-load");
   gimp_procedure_set_static_help (procedure,
@@ -407,7 +407,7 @@ register_file_procs (GimpPDB *pdb)
   /*
    * gimp-file-load-layer
    */
-  procedure = gimp_procedure_new (file_load_layer_invoker);
+  procedure = gimp_procedure_new (file_load_layer_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-file-load-layer");
   gimp_procedure_set_static_help (procedure,
@@ -451,7 +451,7 @@ register_file_procs (GimpPDB *pdb)
   /*
    * gimp-file-load-layers
    */
-  procedure = gimp_procedure_new (file_load_layers_invoker);
+  procedure = gimp_procedure_new (file_load_layers_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-file-load-layers");
   gimp_procedure_set_static_help (procedure,
@@ -495,12 +495,13 @@ register_file_procs (GimpPDB *pdb)
   /*
    * gimp-file-save
    */
-  procedure = gimp_procedure_new (file_save_invoker);
+  procedure = gimp_procedure_new (file_save_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-file-save");
   gimp_procedure_set_static_help (procedure,
-                                  "Saves a file by extension.",
-                                  "This procedure invokes the correct file save handler according to the file's extension and/or prefix.\n"
+                                  "Saves to XCF or export @image to any supported format by extension.",
+                                  "This procedure invokes the correct file save/export handler according to @file's extension and/or prefix.\n"
+                                  "\n"
                                   "The @options argument is currently unused and should be set to %NULL right now.",
                                   NULL);
   gimp_procedure_set_static_attribution (procedure,
@@ -523,7 +524,7 @@ register_file_procs (GimpPDB *pdb)
   gimp_procedure_add_argument (procedure,
                                g_param_spec_object ("file",
                                                     "file",
-                                                    "The file to save the image in",
+                                                    "The file to save or export the image in",
                                                     G_TYPE_FILE,
                                                     GIMP_PARAM_READWRITE));
   gimp_procedure_add_argument (procedure,
@@ -537,7 +538,7 @@ register_file_procs (GimpPDB *pdb)
   /*
    * gimp-file-load-thumbnail
    */
-  procedure = gimp_procedure_new (file_load_thumbnail_invoker);
+  procedure = gimp_procedure_new (file_load_thumbnail_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-file-load-thumbnail");
   gimp_procedure_set_static_help (procedure,
@@ -576,14 +577,17 @@ register_file_procs (GimpPDB *pdb)
   g_object_unref (procedure);
 
   /*
-   * gimp-file-save-thumbnail
+   * gimp-file-create-thumbnail
    */
-  procedure = gimp_procedure_new (file_save_thumbnail_invoker);
+  procedure = gimp_procedure_new (file_create_thumbnail_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
-                               "gimp-file-save-thumbnail");
+                               "gimp-file-create-thumbnail");
   gimp_procedure_set_static_help (procedure,
-                                  "Saves a thumbnail for the given image",
-                                  "This procedure saves a thumbnail for the given image according to the Free Desktop Thumbnail Managing Standard. The thumbnail is saved so that it belongs to the given file. This means you have to save the image under this name first, otherwise this procedure will fail. This procedure may become useful if you want to explicitly save a thumbnail with a file.",
+                                  "Creates a thumbnail of @image for the given @file",
+                                  "This procedure creates a thumbnail for the given @file and stores it according to relevant standards.\n"
+                                  "In particular, it will follow the [Free Desktop Thumbnail Managing Standard](https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html) when relevant.\n"
+                                  "\n"
+                                  "The thumbnail is stored so that it belongs to the given @file. This means you have to save @image under this name first. As a fallback, the call will work if @image was exported or imported as @file. In any other case, this procedure will fail.",
                                   NULL);
   gimp_procedure_set_static_attribution (procedure,
                                          "Josh MacDonald",

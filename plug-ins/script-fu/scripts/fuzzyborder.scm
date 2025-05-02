@@ -67,10 +67,10 @@
     )
 
     (set! theLayer (car (gimp-layer-new theImage
+                                        "layer 1"
                                         theWidth
                                         theHeight
                                         RGBA-IMAGE
-                                        "layer 1"
                                         100
                                         LAYER-MODE-NORMAL)))
 
@@ -105,7 +105,7 @@
     (if (= inShadow TRUE)
         (begin
           (gimp-image-insert-layer theImage
-                                   (car (gimp-layer-copy theLayer FALSE)) 0 -1)
+                                   (car (gimp-layer-copy theLayer)) 0 -1)
           (gimp-layer-scale theLayer
                             (- theWidth inSize) (- theHeight inSize) TRUE)
           (gimp-drawable-desaturate theLayer DESATURATE-LIGHTNESS)

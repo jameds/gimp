@@ -587,14 +587,14 @@ CODE
     }
     elsif ($pdbtype eq 'string') {
 	$allow_non_utf8 = exists $arg->{allow_non_utf8} ? 'TRUE' : 'FALSE';
-	$null_ok = exists $arg->{null_ok} ? 'TRUE' : 'FALSE';
+	$none_ok = exists $arg->{none_ok} ? 'TRUE' : 'FALSE';
 	$non_empty = exists $arg->{non_empty} ? 'TRUE' : 'FALSE';
 	$default = exists $arg->{default} ? $arg->{default} : NULL;
 	$pspec = <<CODE;
 gimp_param_spec_string ("$name",
                         "$nick",
                         "$blurb",
-                        $allow_non_utf8, $null_ok, $non_empty,
+                        $allow_non_utf8, $none_ok, $non_empty,
                         $default,
                         $flags)
 CODE
@@ -888,6 +888,7 @@ sub generate {
 	my $help = $proc->{help};
 
 	my $procedure_name;
+	my $procedure_is_private;
 
 	local $success = 0;
 
@@ -922,12 +923,18 @@ sub generate {
 
 	$out->{pcount}++; $total++;
 
+        if ($proc->{lib_private}) {
+            $procedure_is_private = "TRUE";
+        } else {
+            $procedure_is_private = "FALSE";
+        }
+
 	$out->{register} .= <<CODE;
 
   /*
    * gimp-$proc->{canonical_name}
    */
-  procedure = gimp_procedure_new (${name}_invoker);
+  procedure = gimp_procedure_new (${name}_invoker, $procedure_is_private);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "$procedure_name");
   gimp_procedure_set_static_help (procedure,

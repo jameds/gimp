@@ -40,9 +40,6 @@ struct _GimpLayerClass
 {
   GimpDrawableClass parent_class;
 
-  /*  virtual functions  */
-  GimpLayer * (* copy) (GimpLayer *layer);
-
   /* Padding for future expansion */
   void (*_gimp_reserved0) (void);
   void (*_gimp_reserved1) (void);
@@ -58,14 +55,6 @@ struct _GimpLayerClass
 
 GimpLayer * gimp_layer_get_by_id          (gint32           layer_id);
 
-GimpLayer * gimp_layer_new                (GimpImage       *image,
-                                           const gchar     *name,
-                                           gint             width,
-                                           gint             height,
-                                           GimpImageType    type,
-                                           gdouble          opacity,
-                                           GimpLayerMode    mode) G_GNUC_WARN_UNUSED_RESULT;
-
 GimpLayer * gimp_layer_new_from_pixbuf    (GimpImage       *image,
                                            const gchar     *name,
                                            GdkPixbuf       *pixbuf,
@@ -78,8 +67,6 @@ GimpLayer * gimp_layer_new_from_surface   (GimpImage       *image,
                                            cairo_surface_t *surface,
                                            gdouble          progress_start,
                                            gdouble          progress_end) G_GNUC_WARN_UNUSED_RESULT;
-
-GimpLayer * gimp_layer_copy               (GimpLayer       *layer);
 
 
 G_END_DECLS

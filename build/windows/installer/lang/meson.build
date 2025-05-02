@@ -1,8 +1,10 @@
+subdir('its')
+
 # First we use the XML file to be able to do gettext translation
 ms_installer_config_xml = i18n.merge_file(
   input : 'setup.isl.xml.in',
   output: '@BASENAME@',
-  data_dirs: meson.current_source_dir(),
+  data_dirs: [meson.current_source_dir(), meson.current_build_dir()],
   po_dir: po_windows_installer_dir,
   install: false,
 )
@@ -56,11 +58,14 @@ languages = [
 # Then, we generate the .isl file for each language using some xsltproc magic
 foreach language : languages
   lang_code = language.get('code')
+  # Since gettext 0.23, outputted xml:lang by msgfmt conforms to W3C
+  # standard. Try both with underscore and hyphens.
+  web_lang_code = lang_code.replace('_', '-')
 
   if 'default' in language
     lang_check = 'value[not(@xml:lang)]'
   else
-    lang_check = 'value[lang(\'@0@\')]'.format(lang_code)
+    lang_check = 'value[lang(\'@0@\')] | value[lang(\'@1@\')]'.format(lang_code, web_lang_code)
   endif
 
   gimp_ms_installer_lang_xsl = configure_file(
@@ -100,7 +105,16 @@ foreach language : languages
 endforeach
 
 # Generate lang lists for Inno
-gen_list = find_program('list-installer-langs.sh')
+gen_list = find_program('list-installer-langs.py')
+
+custom_target('base_po-msg',
+  input : [ 'iso_639_custom.xml' ],
+  output: [ 'base_po-msg.list', ],
+  command: [
+    gen_list, 'msg', '@SOURCE_ROOT@'
+  ],
+  build_by_default: true,
+)
 
 custom_target('base_po-cmp',
   input : [ 'iso_639_custom.xml' ],
@@ -119,19 +133,3 @@ custom_target('base_po-files',
   ],
   build_by_default: true,
 )
-
-custom_target('base_po-msg',
-  input : [ 'iso_639_custom.xml' ],
-  output: [ 'base_po-msg.list', ],
-  command: [
-    gen_list, 'msg', '@SOURCE_ROOT@'
-  ],
-  build_by_default: true,
-)
-
-test('windows-installer-langs',
-  find_program('test-installer-langs.sh'),
-  env: [
-    'GIMP_TESTING_ABS_TOP_SRCDIR=' + meson.project_source_root(),
-  ],
-  suite: 'build')

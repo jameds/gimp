@@ -657,11 +657,15 @@ gimp_procedure_dialog_set_ok_label (GimpProcedureDialog *dialog,
  *         non-editable color area with a label.
  *     * %GIMP_TYPE_COLOR_BUTTON: a color button with no label.
  *     * %GIMP_TYPE_COLOR_AREA: a color area with no label.
- * - %G_TYPE_PARAM_FILE:
- *     * %GTK_FILE_CHOOSER_BUTTON (default): generic file chooser button
- *     in %GTK_FILE_CHOOSER_ACTION_OPEN mode. Please use
- *     gimp_procedure_dialog_get_file_chooser() to create buttons in
- *     other modes.
+ * - %GIMP_TYPE_PARAM_FILE:
+ *     * %GTK_FILE_CHOOSER_BUTTON (default): generic file chooser widget
+ *       using the action mode of the param spec.
+ *       Note that it won't work with a [enum@Gimp.FileChooserAction.ANY]
+ *       action. If you intend to display a widget for a file param
+ *       spec, you should always set it to a more specific action.
+ *       See [method@Gimp.Procedure.add_file_argument].
+ * - %G_TYPE_PARAM_UNIT:
+ *     * %GIMP_TYPE_UNIT_COMBO_BOX
  *
  * If the @widget_type is not supported for the actual type of
  * @property, the function will fail. To keep the default, set to
@@ -796,16 +800,33 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
   else if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_COLOR ||
            G_PARAM_SPEC_TYPE (pspec) == GEGL_TYPE_PARAM_COLOR)
     {
+      gboolean has_alpha = TRUE;
+
+      if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_COLOR)
+        has_alpha = gimp_param_spec_color_has_alpha (pspec);
+
       if (widget_type == G_TYPE_NONE || widget_type == GIMP_TYPE_LABEL_COLOR)
         {
           widget = gimp_prop_label_color_new (G_OBJECT (priv->config),
                                               property, TRUE);
+
+          if (! has_alpha)
+            {
+              GtkWidget *color_button;
+
+              color_button =
+                gimp_label_color_get_color_widget (GIMP_LABEL_COLOR (widget));
+              gimp_color_button_set_type (GIMP_COLOR_BUTTON (color_button),
+                                          GIMP_COLOR_AREA_FLAT);
+            }
         }
       else if (widget_type == GIMP_TYPE_COLOR_AREA)
         {
           widget = gimp_prop_color_area_new (G_OBJECT (priv->config),
                                              property, 20, 20,
-                                             GIMP_COLOR_AREA_SMALL_CHECKS);
+                                             has_alpha ?
+                                             GIMP_COLOR_AREA_SMALL_CHECKS :
+                                             GIMP_COLOR_AREA_FLAT);
           gtk_widget_set_vexpand (widget, FALSE);
           gtk_widget_set_hexpand (widget, FALSE);
         }
@@ -813,16 +834,17 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
         {
           widget = gimp_prop_color_select_new (G_OBJECT (priv->config),
                                                property, 20, 20,
-                                               GIMP_COLOR_AREA_SMALL_CHECKS);
+                                               has_alpha ?
+                                               GIMP_COLOR_AREA_SMALL_CHECKS :
+                                               GIMP_COLOR_AREA_FLAT);
           gtk_widget_set_vexpand (widget, FALSE);
           gtk_widget_set_hexpand (widget, FALSE);
         }
     }
-  else if (G_IS_PARAM_SPEC_OBJECT (pspec) && pspec->value_type == G_TYPE_FILE)
+  else if (GIMP_IS_PARAM_SPEC_FILE (pspec))
     {
-      widget = gimp_prop_file_chooser_button_new (G_OBJECT (priv->config),
-                                                  property, NULL,
-                                                  GTK_FILE_CHOOSER_ACTION_OPEN);
+      widget = gimp_prop_file_chooser_new (G_OBJECT (priv->config), property, NULL, NULL);
+      label  = gimp_file_chooser_get_label_widget (GIMP_FILE_CHOOSER (widget));
     }
   else if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_CHOICE)
     {
@@ -868,7 +890,7 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
     {
       widget = gimp_prop_drawable_chooser_new (G_OBJECT (priv->config), property, NULL);
     }
-  else  if (G_PARAM_SPEC_TYPE (pspec) == G_TYPE_PARAM_ENUM)
+  else if (G_PARAM_SPEC_TYPE (pspec) == G_TYPE_PARAM_ENUM)
     {
       GimpIntStore *store;
 
@@ -881,6 +903,10 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
       gtk_widget_set_hexpand (widget, TRUE);
       widget = gimp_label_int_widget_new (g_param_spec_get_nick (pspec),
                                           widget);
+    }
+  else if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_UNIT)
+    {
+      widget = gimp_prop_unit_combo_box_new (G_OBJECT (priv->config), property);
     }
   else
     {
@@ -914,8 +940,18 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
           else if (GIMP_IS_DRAWABLE_CHOOSER (widget))
             label = gimp_drawable_chooser_get_label (GIMP_DRAWABLE_CHOOSER (widget));
         }
+
       if (label != NULL)
-        gtk_size_group_add_widget (priv->label_group, label);
+        {
+          gtk_size_group_add_widget (priv->label_group, label);
+
+          /* Make sure all labels have consistent alignment and margin. */
+          gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+          gtk_widget_set_margin_end (GTK_WIDGET (label), 4);
+          gtk_widget_set_margin_start (GTK_WIDGET (label), 0);
+          gtk_widget_set_margin_top (GTK_WIDGET (label), 0);
+          gtk_widget_set_margin_bottom (GTK_WIDGET (label), 0);
+        }
     }
 
   if ((binding = g_hash_table_lookup (priv->sensitive_data, property)))
@@ -934,6 +970,8 @@ gimp_procedure_dialog_get_widget (GimpProcedureDialog *dialog,
 
       g_hash_table_remove (priv->sensitive_data, property);
     }
+
+  g_return_val_if_fail (g_hash_table_lookup_extended (priv->widgets, property, NULL, NULL) == FALSE, NULL);
 
   gimp_procedure_dialog_check_mnemonic (dialog, widget, property, NULL);
   g_hash_table_insert (priv->widgets, g_strdup (property), widget);
@@ -972,8 +1010,9 @@ gimp_procedure_dialog_get_color_widget (GimpProcedureDialog *dialog,
                                         GimpColorAreaType    type)
 {
   GimpProcedureDialogPrivate *priv;
-  GtkWidget                  *widget = NULL;
+  GtkWidget                  *widget    = NULL;
   GParamSpec                 *pspec;
+  gboolean                    has_alpha = TRUE;
 
   g_return_val_if_fail (property != NULL, NULL);
 
@@ -993,6 +1032,9 @@ gimp_procedure_dialog_get_color_widget (GimpProcedureDialog *dialog,
                  G_STRFUNC, property);
       return NULL;
     }
+
+  if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_COLOR)
+    has_alpha = gimp_param_spec_color_has_alpha (pspec);
 
   if (G_PARAM_SPEC_TYPE (pspec) == GIMP_TYPE_PARAM_COLOR ||
       G_PARAM_SPEC_TYPE (pspec) == GEGL_TYPE_PARAM_COLOR)
@@ -1018,6 +1060,16 @@ gimp_procedure_dialog_get_color_widget (GimpProcedureDialog *dialog,
       gtk_size_group_add_widget (priv->label_group, label);
       if (tooltip)
         gimp_help_set_help_data (label, tooltip, NULL);
+    }
+
+  if (! has_alpha)
+    {
+      GtkWidget *color_button;
+
+      color_button =
+        gimp_label_color_get_color_widget (GIMP_LABEL_COLOR (widget));
+      gimp_color_button_set_type (GIMP_COLOR_BUTTON (color_button),
+                                  GIMP_COLOR_AREA_FLAT);
     }
 
   gimp_procedure_dialog_check_mnemonic (dialog, widget, property, NULL);
@@ -1565,76 +1617,6 @@ gimp_procedure_dialog_get_label (GimpProcedureDialog *dialog,
     g_object_ref_sink (label);
 
   return label;
-}
-
-/**
- * gimp_procedure_dialog_get_file_chooser:
- * @dialog:   the associated #GimpProcedureDialog.
- * @property: name of the %GimpParamConfigPath or %GParamObject of value
- *            type %GFile property to build a #GtkFileChooserButton for.
- *            It must be a property of the #GimpProcedure @dialog has
- *            been created for.
- * @action:   The open mode for the widget.
- *
- * Creates a new %GtkFileChooserButton for @property which must
- * necessarily be a config path or %GFile property.
- * This can be used instead of gimp_procedure_dialog_get_widget() in
- * particular if you want to create a button in non-open modes (i.e. to
- * save files, and select or create folders).
- *
- * If a widget has already been created for this procedure, it will be
- * returned instead (whatever its actual widget type).
- *
- * Returns: (transfer none): the #GtkWidget representing @property. The
- *                           object belongs to @dialog and must not be
- *                           freed.
- */
-GtkWidget *
-gimp_procedure_dialog_get_file_chooser (GimpProcedureDialog  *dialog,
-                                        const gchar          *property,
-                                        GtkFileChooserAction  action)
-{
-  GimpProcedureDialogPrivate *priv;
-  GtkWidget                  *widget = NULL;
-  GParamSpec                 *pspec;
-
-  g_return_val_if_fail (GIMP_IS_PROCEDURE_DIALOG (dialog), NULL);
-  g_return_val_if_fail (property != NULL, NULL);
-
-  priv  = gimp_procedure_dialog_get_instance_private (dialog);
-  pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (priv->config),
-                                        property);
-
-  if (! pspec)
-    {
-      g_warning ("%s: parameter %s does not exist.",
-                 G_STRFUNC, property);
-      return NULL;
-    }
-
-  g_return_val_if_fail (GIMP_IS_PARAM_SPEC_CONFIG_PATH (pspec) ||
-                          (G_IS_PARAM_SPEC_OBJECT (pspec) && pspec->value_type == G_TYPE_FILE),
-                        NULL);
-
-  /* First check if it already exists. */
-  widget = g_hash_table_lookup (priv->widgets, property);
-
-  if (widget)
-    return widget;
-
-  widget = gimp_prop_file_chooser_button_new (G_OBJECT (priv->config),
-                                              property, NULL, action);
-
-  /* TODO: make is a file chooser with label. */
-  /*gtk_size_group_add_widget (priv->label_group,
-                             gimp_labeled_get_label (GIMP_LABELED (widget)));
-
-  gimp_procedure_dialog_check_mnemonic (dialog, widget, property, NULL);*/
-  g_hash_table_insert (priv->widgets, g_strdup (property), widget);
-  if (g_object_is_floating (widget))
-    g_object_ref_sink (widget);
-
-  return widget;
 }
 
 /**
@@ -2791,6 +2773,10 @@ gimp_procedure_dialog_check_mnemonic (GimpProcedureDialog *dialog,
   else if (GIMP_IS_DRAWABLE_CHOOSER (widget))
     {
       label = gimp_drawable_chooser_get_label (GIMP_DRAWABLE_CHOOSER (widget));
+    }
+  else if (GIMP_IS_FILE_CHOOSER (widget))
+    {
+      label = gimp_file_chooser_get_label_widget (GIMP_FILE_CHOOSER (widget));
     }
   else
     {

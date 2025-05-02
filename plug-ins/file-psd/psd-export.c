@@ -695,12 +695,6 @@ save_resources (GOutputStream        *output,
 
   IFDBG(1) g_debug ("Function: save_resources");
 
-
-  /* Get the image title from its filename */
-
-  IFDBG(1) g_debug ("\tImage title: %s",
-                    g_file_peek_path (gimp_image_get_file (image)));
-
   /* Get the selected layers */
 
   SelLayers = gimp_image_list_selected_layers (image);
@@ -1170,7 +1164,7 @@ save_paths (GOutputStream  *output,
        iter = g_list_next (iter), v++)
     {
       GString *data;
-      gchar   *name, *nameend;
+      gchar   *name;
       gsize    len;
       gint     lenpos;
       gchar    pointrecord[26] = { 0, };
@@ -1183,10 +1177,10 @@ save_paths (GOutputStream  *output,
 
       /*
        * - use iso8859-1 if possible
-       * - otherwise use UTF-8, prepended with \xef\xbb\xbf (Byte-Order-Mark)
+       * - otherwise use ASCII
        */
       name = gimp_item_get_name (iter->data);
-      tmpname = g_convert (name, -1, "iso8859-1", "utf-8", NULL, &len, &err);
+      tmpname = g_convert (name, -1, "ISO-8859-1", "UTF-8", NULL, &len, &err);
 
       if (tmpname && err == NULL)
         {
@@ -1196,17 +1190,15 @@ save_paths (GOutputStream  *output,
         }
       else
         {
-          /* conversion failed, we fall back to UTF-8 */
-          len = g_utf8_strlen (name, 255 - 3);  /* need three marker-bytes */
+          /* conversion failed, we fall back to ASCII */
+          gchar *ascii_name = g_str_to_ascii (name, NULL);
 
-          nameend = g_utf8_offset_to_pointer (name, len);
-          len = nameend - name; /* in bytes */
-          g_assert (len + 3 <= 255);
+          len = g_utf8_strlen (ascii_name, 255);
 
-          g_string_append_c (data, len + 3);
-          g_string_append_len (data, "\xEF\xBB\xBF", 3); /* Unicode 0xfeff */
-          g_string_append_len (data, name, len);
+          g_string_append_c (data, (gchar) MIN (len, 255));
+          g_string_append_len (data, ascii_name, MIN (len, 255));
 
+          g_free (ascii_name);
           if (tmpname)
             g_free (tmpname);
         }
@@ -1306,11 +1298,21 @@ save_clipping_path (GOutputStream  *output,
   g_string_append_c (data, id / 256);
   g_string_append_c (data, id % 256);
 
-  tmpname = g_convert (path_name, -1, "iso8859-1", "utf-8", NULL, &len, &err);
+  tmpname = g_convert (path_name, -1, "ISO-8859-1", "UTF-8", NULL, &len, &err);
+  if (err != NULL || tmpname == NULL)
+    {
+      /* conversion failed, we fall back to ASCII */
+      if (tmpname)
+        g_free (tmpname);
+
+      tmpname = g_str_to_ascii (path_name, NULL);
+      len     = g_utf8_strlen (tmpname, 255);
+    }
 
   g_string_append_len (data, "\x00\x00\x00\x00", 4);
   if ((len + 6 + 1) <= 255)
     g_string_append_len (data, "\x00", 1);
+  /* The number of bytes for the two values after the path name is 6 */
   g_string_append_c (data, len + 6 + 1);
 
   g_string_append_c (data, (gchar) MIN (len, 255));
@@ -1995,10 +1997,13 @@ save_data (GOutputStream  *output,
 
   IFDBG(1) g_debug ("Function: save_data");
 
-  ChanCount = (PSDImageData.nChannels +
-               nChansLayer (PSDImageData.baseType,
-                            gimp_drawable_has_alpha (GIMP_DRAWABLE (PSDImageData.merged_layer)),
-                            0));
+  if (! export_cmyk)
+    chan = nChansLayer (PSDImageData.baseType,
+                        gimp_drawable_has_alpha (GIMP_DRAWABLE (PSDImageData.merged_layer)), 0);
+  else
+    chan = gimp_drawable_has_alpha (GIMP_DRAWABLE (PSDImageData.merged_layer)) ? 5 : 4;
+
+  ChanCount = PSDImageData.nChannels + chan;
 
   imageHeight = gimp_image_get_height (image);
 
@@ -2015,9 +2020,6 @@ save_data (GOutputStream  *output,
   IFDBG(1) g_debug ("\t\tWriting compressed image data");
   write_pixel_data (output, image, GIMP_DRAWABLE (PSDImageData.merged_layer),
                     NULL, offset, FALSE, export_cmyk);
-
-  chan = nChansLayer (PSDImageData.baseType,
-                      gimp_drawable_has_alpha (GIMP_DRAWABLE (PSDImageData.merged_layer)), 0);
 
   for (iter = PSDImageData.lChannels; iter; iter = g_list_next (iter))
     {
@@ -2448,9 +2450,9 @@ save_dialog (GimpImage     *image,
   GList            *paths;
   gboolean          run;
 
-  dialog = gimp_procedure_dialog_new (procedure,
-                                      GIMP_PROCEDURE_CONFIG (config),
-                                      _("Export Image as PSD"));
+  dialog = gimp_export_procedure_dialog_new (GIMP_EXPORT_PROCEDURE (procedure),
+                                             GIMP_PROCEDURE_CONFIG (config),
+                                             image);
 
   /* CMYK profile label */
   profile_label = gimp_procedure_dialog_get_label (GIMP_PROCEDURE_DIALOG (dialog),

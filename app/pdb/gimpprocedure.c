@@ -107,7 +107,8 @@ gimp_procedure_class_init (GimpProcedureClass *klass)
 static void
 gimp_procedure_init (GimpProcedure *procedure)
 {
-  procedure->proc_type = GIMP_PDB_PROC_TYPE_INTERNAL;
+  procedure->proc_type   = GIMP_PDB_PROC_TYPE_INTERNAL;
+  procedure->is_private  = FALSE;
 }
 
 static void
@@ -282,7 +283,8 @@ gimp_procedure_real_execute_async (GimpProcedure  *procedure,
 /*  public functions  */
 
 GimpProcedure  *
-gimp_procedure_new (GimpMarshalFunc marshal_func)
+gimp_procedure_new (GimpMarshalFunc marshal_func,
+                    gboolean        is_private)
 {
   GimpProcedure *procedure;
 
@@ -291,6 +293,7 @@ gimp_procedure_new (GimpMarshalFunc marshal_func)
   procedure = g_object_new (GIMP_TYPE_PROCEDURE, NULL);
 
   procedure->marshal_func = marshal_func;
+  procedure->is_private   = is_private;
 
   return procedure;
 }
@@ -763,7 +766,7 @@ gimp_procedure_create_override (GimpProcedure   *procedure,
   const gchar   *name          = NULL;
   int            i             = 0;
 
-  new_procedure = gimp_procedure_new (new_marshal_func);
+  new_procedure = gimp_procedure_new (new_marshal_func, procedure->is_private);
   name          = gimp_object_get_name (procedure);
 
   gimp_object_set_static_name (GIMP_OBJECT (new_procedure), name);
@@ -948,9 +951,9 @@ gimp_procedure_validate_args (GimpProcedure  *procedure,
                 }
               else if (GIMP_IS_PARAM_SPEC_UNIT (pspec) &&
                        ((GIMP_UNIT (old_value) == gimp_unit_pixel () &&
-                         ! GIMP_PARAM_SPEC_UNIT (pspec)->allow_pixel) ||
+                         ! gimp_param_spec_unit_pixel_allowed (pspec)) ||
                         (GIMP_UNIT (old_value) == gimp_unit_percent () &&
-                         ! GIMP_PARAM_SPEC_UNIT (pspec)->allow_percent)))
+                         ! gimp_param_spec_unit_percent_allowed (pspec))))
                 {
                   if (return_vals)
                     {

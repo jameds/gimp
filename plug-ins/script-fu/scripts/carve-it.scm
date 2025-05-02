@@ -70,7 +70,7 @@
         (bg-height (car (gimp-drawable-get-height src-layer)))
         (bg-type (car (gimp-drawable-type src-layer)))
         (bg-image (car (gimp-item-get-image src-layer)))
-        (layer1 (car (gimp-layer-new img bg-width bg-height bg-type "Layer1" 100 LAYER-MODE-NORMAL)))
+        (layer1 (car (gimp-layer-new img "Layer1" bg-width bg-height bg-type 100 LAYER-MODE-NORMAL)))
         )
 
     (gimp-context-push)
@@ -88,7 +88,12 @@
     (gimp-edit-copy (vector mask-drawable))
     (gimp-image-insert-channel img mask -1 0)
 
-    (plug-in-tile RUN-NONINTERACTIVE img (vector layer1) width height FALSE)
+    (plug-in-tile #:run-mode   RUN-NONINTERACTIVE
+                  #:image      img
+                  #:drawables  (vector layer1)
+                  #:new-width  width
+                  #:new-height height
+                  #:new-image  FALSE)
     (let* (
            (pasted (car (gimp-edit-paste mask FALSE)))
            (floating-sel (vector-ref pasted(- (vector-length pasted) 1)))
@@ -182,7 +187,8 @@
     (gimp-context-set-background '(255 255 255))
     (gimp-drawable-edit-fill csl-mask FILL-BACKGROUND)
 
-    (set! inset-layer (car (gimp-layer-copy layer1 TRUE)))
+    (set! inset-layer (car (gimp-layer-copy layer1)))
+    (gimp-layer-add-alpha inset-layer)
     (gimp-image-insert-layer img inset-layer 0 1)
 
     (set! il-mask (car (gimp-layer-create-mask inset-layer ADD-MASK-BLACK)))

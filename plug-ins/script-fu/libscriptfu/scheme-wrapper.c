@@ -70,7 +70,8 @@ static pointer  script_fu_marshal_arg_to_value                    (scheme       
                                                                    const gchar         *proc_name,
                                                                    gint                 arg_index,
                                                                    GParamSpec          *arg_spec,
-                                                                   GValue              *value);
+                                                                   GValue              *value,
+                                                                   gchar              **strvalue);
 
 static pointer  script_fu_marshal_procedure_call                  (scheme              *sc,
                                                                    pointer              a,
@@ -81,6 +82,8 @@ static pointer  script_fu_marshal_procedure_call_strict           (scheme       
 static pointer  script_fu_marshal_procedure_call_permissive       (scheme              *sc,
                                                                    pointer              a);
 static pointer  script_fu_marshal_procedure_call_deprecated       (scheme              *sc,
+                                                                   pointer              a);
+static pointer  script_fu_marshal_procedure_exists                (scheme              *sc,
                                                                    pointer              a);
 
 static pointer  script_fu_marshal_drawable_create_filter          (scheme              *sc,
@@ -570,6 +573,8 @@ ts_define_procedure (sc, "load-extension", scm_load_ext);
   ts_define_procedure (sc, "-gimp-proc-db-call",  script_fu_marshal_procedure_call_permissive);
   ts_define_procedure (sc, "--gimp-proc-db-call", script_fu_marshal_procedure_call_deprecated);
 
+  ts_define_procedure (sc, "gimp-pdb-procedure-exists", script_fu_marshal_procedure_exists);
+
   ts_define_procedure (sc, "gimp-drawable-filter-configure", script_fu_marshal_drawable_filter_configure_call);
   ts_define_procedure (sc, "gimp-drawable-filter-set-aux-input", script_fu_marshal_drawable_filter_set_aux_call);
   ts_define_procedure (sc, "gimp-drawable-merge-filter", script_fu_marshal_drawable_merge_filter_call);
@@ -728,13 +733,15 @@ ts_load_file (const gchar *dirname,
   return FALSE;
 }
 
+/* Returns pointer to sc->NIL (normal) or pointer to error. */
 static pointer
-script_fu_marshal_arg_to_value (scheme      *sc,
-                                pointer      a,
-                                const gchar *proc_name,
-                                gint         arg_index,
-                                GParamSpec  *arg_spec,
-                                GValue      *value)
+script_fu_marshal_arg_to_value (scheme       *sc,
+                                pointer       a,
+                                const gchar  *proc_name,
+                                gint          arg_index,
+                                GParamSpec   *arg_spec,
+                                GValue       *value,
+                                gchar       **strvalue)
 {
   pointer arg_val;
   pointer vector;
@@ -762,6 +769,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
             return script_int_range_error (sc, arg_index, proc_name, ispec->minimum, ispec->maximum, v);
 
           g_value_set_int (value, v);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", v);
         }
     }
   else if (G_VALUE_HOLDS_UINT (value))
@@ -779,6 +788,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
             return script_int_range_error (sc, arg_index, proc_name, ispec->minimum, ispec->maximum, v);
 
           g_value_set_uint (value, v);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%u", v);
         }
     }
   else if (G_VALUE_HOLDS_UCHAR (value))
@@ -796,6 +807,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
             return script_int_range_error (sc, arg_index, proc_name, cspec->minimum, cspec->maximum, c);
 
           g_value_set_uchar (value, c);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", c);
         }
     }
   else if (G_VALUE_HOLDS_DOUBLE (value))
@@ -813,26 +826,38 @@ script_fu_marshal_arg_to_value (scheme      *sc,
             return script_float_range_error (sc, arg_index, proc_name, dspec->minimum, dspec->maximum, d);
 
           g_value_set_double (value, d);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%f", d);
         }
     }
   else if (G_VALUE_HOLDS_ENUM (value))
     {
       if (! sc->vptr->is_number (arg_val))
-        return script_type_error (sc, "numeric", arg_index, proc_name);
+        {
+          return script_type_error (sc, "numeric", arg_index, proc_name);
+        }
       else
-        g_value_set_enum (value,
-                          sc->vptr->ivalue (arg_val));
+        {
+          gint e = sc->vptr->ivalue (arg_val);
+
+          g_value_set_enum (value, e);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", e);
+        }
     }
   else if (G_VALUE_HOLDS_BOOLEAN (value))
     {
       if (sc->vptr->is_number (arg_val))
         {
+          gboolean b = sc->vptr->ivalue (arg_val);
+
           /* Bind according to C idiom: 0 is false, other numeric values true.
            * This is not strict Scheme: 0 is truthy in Scheme.
            * This lets FALSE still work, where FALSE is a deprecated symbol for 0.
            */
-          g_value_set_boolean (value,
-                               sc->vptr->ivalue (arg_val));
+          g_value_set_boolean (value, b);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%s", b ? "TRUE" : "FALSE");
         }
       else
         {
@@ -846,6 +871,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                */
               gboolean truth_value = ! (arg_val == sc->F);
               g_value_set_boolean (value, truth_value);
+              if (strvalue)
+                *strvalue = g_strdup_printf ("%s", truth_value ? "TRUE" : "FALSE");
             }
           else
             {
@@ -857,10 +884,21 @@ script_fu_marshal_arg_to_value (scheme      *sc,
   else if (G_VALUE_HOLDS_STRING (value))
     {
       if (! sc->vptr->is_string (arg_val))
-        return script_type_error (sc, "string", arg_index, proc_name);
+        {
+          return script_type_error (sc, "string", arg_index, proc_name);
+        }
       else
-        g_value_set_string (value,
-                            sc->vptr->string_value (arg_val));
+        {
+          const gchar *s = sc->vptr->string_value (arg_val);
+
+          g_value_set_string (value, s);
+          if (strvalue)
+            {
+              gchar *escaped = g_strescape (s, NULL);
+              *strvalue = g_strdup_printf ("\"%s\"", escaped);
+              g_free (escaped);
+            }
+        }
     }
   else if (G_VALUE_HOLDS (value, G_TYPE_STRV))
     {
@@ -871,11 +909,14 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          gchar **array;
+          gchar   **array;
+          GString  *v = NULL;
 
           n_elements = sc->vptr->list_length (sc, vector);
 
           array = g_new0 (gchar *, n_elements + 1);
+          if (strvalue)
+            v = g_string_new ("");
 
           for (j = 0; j < n_elements; j++)
             {
@@ -887,10 +928,18 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                               "Item %d in vector is not a string (argument %d for function %s)",
                               j+1, arg_index+1, proc_name);
                   g_strfreev (array);
+                  if (v)
+                    g_string_free (v, TRUE);
                   return foreign_error (sc, error_str, vector);
                 }
 
               array[j] = g_strdup (sc->vptr->string_value (v_element));
+              if (v)
+                {
+                  gchar *escaped = g_strescape (array[j], NULL);
+                  g_string_append_printf (v, "%s\"%s\"", j == 0 ? "" : " ", escaped);
+                  g_free (escaped);
+                }
 
               vector = sc->vptr->pair_cdr (vector);
             }
@@ -910,6 +959,12 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                 }
             }
 #endif
+
+          if (v)
+            {
+              *strvalue = g_strdup_printf ("#(%s)", v->str);
+              g_string_free (v, TRUE);
+            }
         }
     }
   else if (GIMP_VALUE_HOLDS_DISPLAY (value))
@@ -920,10 +975,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpDisplay *display =
-            gimp_display_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpDisplay *display;
+          gint         id = sc->vptr->ivalue (arg_val);
+
+          display = gimp_display_get_by_id (id);
 
           g_value_set_object (value, display);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_IMAGE (value))
@@ -934,10 +994,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpImage *image =
-            gimp_image_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpImage *image;
+          gint       id = sc->vptr->ivalue (arg_val);
+
+          image = gimp_image_get_by_id (id);
 
           g_value_set_object (value, image);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_LAYER (value))
@@ -948,10 +1013,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpLayer *layer =
-            gimp_layer_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpLayer *layer;
+          gint       id = sc->vptr->ivalue (arg_val);
+
+          layer = gimp_layer_get_by_id (id);
 
           g_value_set_object (value, layer);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_LAYER_MASK (value))
@@ -962,10 +1032,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpLayerMask *layer_mask =
-            gimp_layer_mask_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpLayerMask *layer_mask;
+          gint           id = sc->vptr->ivalue (arg_val);
+
+          layer_mask = gimp_layer_mask_get_by_id (id);
 
           g_value_set_object (value, layer_mask);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_CHANNEL (value))
@@ -976,10 +1051,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpChannel *channel =
-            gimp_channel_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpChannel *channel;
+          gint         id = sc->vptr->ivalue (arg_val);
+
+          channel = gimp_channel_get_by_id (id);
 
           g_value_set_object (value, channel);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_DRAWABLE (value))
@@ -995,6 +1075,9 @@ script_fu_marshal_arg_to_value (scheme      *sc,
           pointer error = marshal_ID_to_item (sc, a, id, value);
           if (error)
             return error;
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_PATH (value))
@@ -1005,10 +1088,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          GimpPath *path =
-            gimp_path_get_by_id (sc->vptr->ivalue (arg_val));
+          GimpPath *path;
+          gint      id = sc->vptr->ivalue (arg_val);
+
+          path = gimp_path_get_by_id (id);
 
           g_value_set_object (value, path);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_ITEM (value))
@@ -1019,12 +1107,11 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          gint item_ID;
-          item_ID = sc->vptr->ivalue (arg_val);
+          gint id = sc->vptr->ivalue (arg_val);
 
-          if (gimp_item_id_is_valid (item_ID))
+          if (gimp_item_id_is_valid (id))
             {
-              GimpItem *item = gimp_item_get_by_id (item_ID);
+              GimpItem *item = gimp_item_get_by_id (id);
               g_value_set_object (value, item);
             }
           else
@@ -1034,6 +1121,9 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                */
               g_value_set_object (value, NULL);
             }
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_DRAWABLE_FILTER (value))
@@ -1044,9 +1134,7 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          gint id;
-
-          id = sc->vptr->ivalue (arg_val);
+          gint id = sc->vptr->ivalue (arg_val);
 
           if (gimp_drawable_filter_id_is_valid (id))
             {
@@ -1061,6 +1149,28 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                */
               g_value_set_object (value, NULL);
             }
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
+        }
+    }
+  else if (GIMP_VALUE_HOLDS_UNIT (value))
+    {
+      if (! sc->vptr->is_number (arg_val))
+        {
+          return script_type_error (sc, "numeric", arg_index, proc_name);
+        }
+      else
+        {
+          GimpUnit *unit;
+          gint      id = sc->vptr->ivalue (arg_val);
+
+          unit = gimp_unit_get_by_id (id);
+
+          g_value_set_object (value, unit);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", id);
         }
     }
   else if (GIMP_VALUE_HOLDS_INT32_ARRAY (value))
@@ -1091,10 +1201,14 @@ script_fu_marshal_arg_to_value (scheme      *sc,
            * FUTURE: List must be *exactly* n_elements long.
            * n_elements != sc->vptr->list_length (sc, vector))
            */
-          gint32 *array;
+          gint32  *array;
+          GString *v = NULL;
 
           n_elements = sc->vptr->vector_length (vector);
           array = g_new0 (gint32, n_elements);
+
+          if (strvalue)
+            v = g_string_new ("");
 
           for (j = 0; j < n_elements; j++)
             {
@@ -1104,13 +1218,22 @@ script_fu_marshal_arg_to_value (scheme      *sc,
               if (! sc->vptr->is_number (v_element))
                 {
                   g_free (array);
+                  if (v)
+                    g_string_free (v, TRUE);
                   return script_type_error_in_container (sc, "numeric", arg_index, j, proc_name, vector);
                 }
 
               array[j] = (gint32) sc->vptr->ivalue (v_element);
+              if (v)
+                g_string_append_printf (v, "%s%d", j == 0 ? "" : " ", array[j]);
             }
 
           gimp_value_take_int32_array (value, array, n_elements);
+          if (v)
+            {
+              *strvalue = g_strdup_printf ("#(%s)", v->str);
+              g_string_free (v, TRUE);
+            }
 
           debug_vector (sc, vector, "%ld");
         }
@@ -1124,11 +1247,14 @@ script_fu_marshal_arg_to_value (scheme      *sc,
         }
       else
         {
-          guint8 *array;
+          guint8   *array;
+          GString  *v = NULL;
 
           n_elements = sc->vptr->vector_length (vector);
 
           array = g_new0 (guint8, n_elements);
+          if (strvalue)
+            v = g_string_new ("");
 
           for (j = 0; j < n_elements; j++)
             {
@@ -1137,13 +1263,22 @@ script_fu_marshal_arg_to_value (scheme      *sc,
               if (!sc->vptr->is_number (v_element))
                 {
                   g_free (array);
+                  if (v)
+                    g_string_free (v, TRUE);
                   return script_type_error_in_container (sc, "numeric", arg_index, j, proc_name, vector);
                 }
 
               array[j] = (guint8) sc->vptr->ivalue (v_element);
+              if (v)
+                g_string_append_printf (v, "%s%d", j == 0 ? "" : " ", array[j]);
             }
 
           g_value_take_boxed (value, g_bytes_new_take (array, n_elements));
+          if (v)
+            {
+              *strvalue = g_strdup_printf ("#(%s)", v->str);
+              g_string_free (v, TRUE);
+            }
 
           debug_vector (sc, vector, "%ld");
         }
@@ -1158,9 +1293,12 @@ script_fu_marshal_arg_to_value (scheme      *sc,
       else
         {
           gdouble *array;
+          GString *v = NULL;
 
           n_elements = sc->vptr->vector_length (vector);
           array = g_new0 (gdouble, n_elements);
+          if (strvalue)
+            v = g_string_new ("");
 
           for (j = 0; j < n_elements; j++)
             {
@@ -1169,13 +1307,22 @@ script_fu_marshal_arg_to_value (scheme      *sc,
               if (!sc->vptr->is_number (v_element))
                 {
                   g_free (array);
+                  if (v)
+                    g_string_free (v, TRUE);
                   return script_type_error_in_container (sc, "numeric", arg_index, j, proc_name, vector);
                 }
 
               array[j] = (gdouble) sc->vptr->rvalue (v_element);
+              if (v)
+                g_string_append_printf (v, "%s%f", j == 0 ? "" : " ", array[j]);
             }
 
           gimp_value_take_double_array (value, array, n_elements);
+          if (v)
+            {
+              *strvalue = g_strdup_printf ("#(%s)", v->str);
+              g_string_free (v, TRUE);
+            }
 
           debug_vector (sc, vector, "%f");
         }
@@ -1190,12 +1337,15 @@ script_fu_marshal_arg_to_value (scheme      *sc,
 
           if (! (color = sf_color_get_color_from_name (color_string)))
             return script_type_error (sc, "color string", arg_index, proc_name);
+
+          if (strvalue)
+            *strvalue = g_strdup_printf ("\"%s\"", color_string);
         }
       else if (sc->vptr->is_list (sc, arg_val))
         {
           pointer color_list = arg_val;
 
-          if (! (color = marshal_component_list_to_color (sc, color_list)))
+          if (! (color = marshal_component_list_to_color (sc, color_list, strvalue)))
             return script_type_error (sc, "color list of numeric components", arg_index, proc_name);
         }
       else
@@ -1216,10 +1366,13 @@ script_fu_marshal_arg_to_value (scheme      *sc,
       else
         {
           GeglColor **colors;
+          GString    *v = NULL;
 
           n_elements = sc->vptr->vector_length (vector);
 
           colors = g_new0 (GeglColor *, n_elements + 1);
+          if (strvalue)
+            v = g_string_new ("");
 
           for (j = 0; j < n_elements; j++)
             {
@@ -1237,6 +1390,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
                               "Item %d in vector is not a color "
                               "(argument %d for function %s)",
                               j+1, arg_index+1, proc_name);
+                  if (v)
+                    g_string_free (v, TRUE);
                   return script_error (sc, error_str, 0);
                 }
 
@@ -1252,9 +1407,16 @@ script_fu_marshal_arg_to_value (scheme      *sc,
 
               colors[j] = gegl_color_new (NULL);
               gegl_color_set_pixel (colors[j], babl_format ("R'G'B' u8"), rgb);
+              if (v)
+                g_string_append_printf (v, " '(%d %d %d)", rgb[0], rgb[1], rgb[2]);
             }
 
           g_value_take_boxed (value, colors);
+          if (v)
+            {
+              *strvalue = g_strdup_printf ("#(%s)", v->str);
+              g_string_free (v, TRUE);
+            }
 
           g_debug ("color vector has %ld elements", sc->vptr->vector_length (vector));
         }
@@ -1305,6 +1467,16 @@ script_fu_marshal_arg_to_value (scheme      *sc,
           g_debug ("data '%s'", (char *)parasite.data);
 
           g_value_set_boxed (value, &parasite);
+          if (strvalue)
+            {
+              gchar *escaped_name = g_strescape (parasite.name, NULL);
+              gchar *escaped_data = g_strescape (parasite.data, NULL);
+
+              *strvalue = g_strdup_printf ("(\"%s\" %d \"%s\")",
+                                           escaped_name, parasite.flags, escaped_data);
+              g_free (escaped_name);
+              g_free (escaped_data);
+            }
         }
     }
   else if (GIMP_VALUE_HOLDS_CORE_OBJECT_ARRAY (value))
@@ -1317,7 +1489,7 @@ script_fu_marshal_arg_to_value (scheme      *sc,
 
       if (sc->vptr->is_vector (vector))
         {
-          pointer error = marshal_vector_to_item_array (sc, vector, value);
+          pointer error = marshal_vector_to_item_array (sc, vector, value, strvalue);
           if (error)
             return error;
         }
@@ -1331,6 +1503,9 @@ script_fu_marshal_arg_to_value (scheme      *sc,
       if (! sc->vptr->is_string (arg_val))
         return script_type_error (sc, "string for path", arg_index, proc_name);
       marshal_path_string_to_gfile (sc, a, value);
+
+      if (strvalue)
+        *strvalue = g_strdup_printf ("%s", sc->vptr->string_value (arg_val));
     }
   else if (G_VALUE_TYPE (value) == GIMP_TYPE_PDB_STATUS_TYPE)
     {
@@ -1368,6 +1543,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
               return script_error (sc, "runtime: resource ID of improper subclass.", a);
             }
           g_value_set_object (value, resource);
+          if (strvalue)
+            *strvalue = g_strdup_printf ("%d", resource_id);
         }
     }
   else if (GIMP_VALUE_HOLDS_EXPORT_OPTIONS (value))
@@ -1383,6 +1560,8 @@ script_fu_marshal_arg_to_value (scheme      *sc,
        * create a GimpExportOptions (actually a proxy?)
        */
       g_value_set_object (value, NULL);
+      if (strvalue)
+        *strvalue = g_strdup_printf ("%d", -1);
     }
   else
     {
@@ -1438,7 +1617,8 @@ script_fu_marshal_procedure_call (scheme   *sc,
                deprecated_name_for (proc_name),
                proc_name);
 
-  script_fu_progress_report (proc_name);
+  if (script_fu_report_progress ())
+    script_fu_progress_report (proc_name);
 
   /*  Attempt to fetch the procedure from the database  */
   procedure = gimp_pdb_lookup_procedure (gimp_get_pdb (), proc_name);
@@ -1454,6 +1634,8 @@ script_fu_marshal_procedure_call (scheme   *sc,
   arg_specs = gimp_procedure_get_arguments (procedure, &n_arg_specs);
   actual_arg_count = sc->vptr->list_length (sc, a) - 1;
 
+  a = sc->vptr->pair_cdr (a);
+
   /* Check the supplied number of arguments.
    * This only gives messages to the console.
    * It does not ensure that the count of supplied args equals the count of formal args.
@@ -1465,61 +1647,158 @@ script_fu_marshal_procedure_call (scheme   *sc,
    * Extra supplied args can be discarded.
    * Formerly, this was a deprecated behavior depending on "permissive".
    */
-  {
-    if (actual_arg_count > n_arg_specs)
-      {
-        /* Permit extra args. Will discard args from script, to next right paren.*/
-        g_info ("in script, permitting too many args to %s", proc_name);
-      }
-    else if (actual_arg_count < n_arg_specs)
-      {
-        /* Permit too few args.  The config carries a sane default for most types. */
-        g_info ("in script, permitting too few args to %s", proc_name);
-      }
-    /* else equal counts of args. */
-  }
+  if (gimp_procedure_is_internal (procedure))
+    {
+      if (actual_arg_count > n_arg_specs)
+        {
+          /* Permit extra args. Will discard args from script, to next right paren.*/
+          g_info ("in script, permitting too many args to %s", proc_name);
+        }
+      else if (actual_arg_count < n_arg_specs)
+        {
+          /* Permit too few args.  The config carries a sane default for most types. */
+          g_info ("in script, permitting too few args to %s", proc_name);
+        }
+      /* else equal counts of args. */
+    }
 
   /*  Marshall the supplied arguments  */
-  for (i = 0; i < n_arg_specs; i++)
+  if (gimp_procedure_is_internal (procedure) ||
+      ! sc->vptr->is_arg_name (sc->vptr->pair_car (a)))
     {
-      GParamSpec *arg_spec = arg_specs[i];
-      GValue      value    = G_VALUE_INIT;
+      GString *deprecation_warning = NULL;
 
-      consumed_arg_count++;
-
-      if (consumed_arg_count > actual_arg_count)
+      if (! gimp_procedure_is_internal (procedure))
         {
-          /* Exhausted supplied arguments before formal specs. */
-
-          /* Say formal type of first missing arg. */
-          g_warning ("Missing arg type: %s", g_type_name (G_PARAM_SPEC_VALUE_TYPE (arg_spec)));
-
-          /* Break loop over formal specs. Continuation is to call PDB with partial args. */
-          break;
+          deprecation_warning = g_string_new ("Calling Plug-In PDB procedures with arguments as an ordered list is deprecated.\n"
+                                              "Please use named arguments: (");
+          g_string_append (deprecation_warning, proc_name);
         }
-      else
-        a = sc->vptr->pair_cdr (a);  /* advance pointer to next arg in list. */
 
-      g_value_init (&value, G_PARAM_SPEC_VALUE_TYPE (arg_spec));
-
-      debug_in_arg (sc, a, i, g_type_name (G_VALUE_TYPE (&value)));
-
-      script_fu_marshal_arg_to_value (sc, a, proc_name, i, arg_spec, &value);
-
-      debug_gvalue (&value);
-      if (g_param_value_validate (arg_spec, &value))
+      for (i = 0; i < n_arg_specs; i++)
         {
-          gchar error_message[1024];
+          GParamSpec *arg_spec = arg_specs[i];
+          GValue      value    = G_VALUE_INIT;
+          gchar      *strvalue = NULL;
 
-          g_snprintf (error_message, sizeof (error_message),
-                      "Invalid value for argument %d",
-                      i);
+          consumed_arg_count++;
+
+          if (gimp_procedure_is_internal (procedure) &&
+              sc->vptr->is_arg_name (sc->vptr->pair_car (a)))
+            {
+              g_snprintf (error_str, sizeof (error_str),
+                          "Calling Internal PDB procedures with named arguments is not authorized.\n"
+                          "Only use the named arguments syntax for Plug-In PDB procedures.");
+              return script_error (sc, error_str, 0);
+            }
+
+          if (consumed_arg_count > actual_arg_count)
+            {
+              /* Exhausted supplied arguments before formal specs. */
+
+              /* Say formal type of first missing arg. */
+              g_warning ("Missing arg type: %s", g_type_name (G_PARAM_SPEC_VALUE_TYPE (arg_spec)));
+
+              /* Break loop over formal specs. Continuation is to call PDB with partial args. */
+              break;
+            }
+
+          g_value_init (&value, G_PARAM_SPEC_VALUE_TYPE (arg_spec));
+
+          debug_in_arg (sc, a, i, g_type_name (G_VALUE_TYPE (&value)));
+
+          return_val = script_fu_marshal_arg_to_value (sc, a, proc_name, i, arg_spec, &value, &strvalue);
+
+          if (return_val != sc->NIL)
+            {
+              g_value_unset (&value);
+              return return_val;
+            }
+
+          debug_gvalue (&value);
+          if (g_param_value_validate (arg_spec, &value))
+            {
+              gchar error_message[1024];
+
+              g_snprintf (error_message, sizeof (error_message),
+                          "Invalid value for argument %d",
+                          i);
+              g_value_unset (&value);
+
+              return script_error (sc, error_message, 0);
+            }
+          g_object_set_property (G_OBJECT (config), arg_specs[i]->name, &value);
           g_value_unset (&value);
 
-          return script_error (sc, error_message, 0);
+          if (deprecation_warning != NULL)
+            g_string_append_printf (deprecation_warning, " #:%s %s",
+                                    arg_specs[i]->name, strvalue);
+
+          a = sc->vptr->pair_cdr (a);
+
+          g_free (strvalue);
         }
-      g_object_set_property (G_OBJECT (config), arg_specs[i]->name, &value);
-      g_value_unset (&value);
+      if (deprecation_warning != NULL)
+        {
+          g_string_append (deprecation_warning, ")");
+          g_warning ("%s", deprecation_warning->str);
+
+          g_string_free (deprecation_warning, TRUE);
+        }
+    }
+  else
+    {
+      for (i = 0; i < actual_arg_count; i++)
+        {
+          GParamSpec *arg_spec;
+          gchar      *arg_name;
+          GValue      value = G_VALUE_INIT;
+
+          if (! sc->vptr->is_arg_name (sc->vptr->pair_car (a)))
+            {
+              g_snprintf (error_str, sizeof (error_str),
+                          "Expected argument name for argument %d", i);
+              return script_error (sc, error_str, 0);
+            }
+
+          arg_name = g_strdup (sc->vptr->string_value (sc->vptr->pair_car (a)));
+
+          arg_spec = g_object_class_find_property (G_OBJECT_GET_CLASS (config), arg_name);
+          if (arg_spec == NULL)
+            {
+              g_snprintf (error_str, sizeof (error_str),
+                          "Invalid argument name: %s", arg_name);
+              g_free (arg_name);
+              return script_error (sc, error_str, 0);
+            }
+
+          if (i == actual_arg_count - 1)
+            {
+              g_snprintf (error_str, sizeof (error_str),
+                          "Lonely argument with no value: %s", arg_name);
+              g_free (arg_name);
+              return script_error (sc, error_str, 0);
+            }
+          else
+            {
+              a = sc->vptr->pair_cdr (a);
+              i++;
+            }
+
+          g_value_init (&value, arg_spec->value_type);
+          return_val = script_fu_marshal_arg_to_value (sc, a, proc_name, i, arg_spec, &value, NULL);
+          if (return_val != sc->NIL)
+            {
+              g_value_unset (&value);
+              g_free (arg_name);
+              return return_val;
+            }
+
+          g_object_set_property (G_OBJECT (config), arg_name, &value);
+          g_value_unset (&value);
+
+          a = sc->vptr->pair_cdr (a);
+        }
     }
 
   /* Omit refresh scripts from a script, better than crashing, see #575830. */
@@ -1589,6 +1868,50 @@ script_fu_marshal_procedure_call_permissive (scheme  *sc,
 }
 
 static pointer
+script_fu_marshal_procedure_exists (scheme  *sc,
+                                    pointer  a)
+{
+  const gchar *proc_name  = "gimp-pdb-procedure-exists";
+  const gchar *test_proc_name;
+  gboolean     exists     = FALSE;
+  gchar        error_str[1024];
+
+  if (a == sc->NIL)
+    {
+      g_snprintf (error_str, sizeof (error_str),
+                  "(%s) was called with no arguments. "
+                  "A procedure name must be specified.",
+                  proc_name);
+
+      return implementation_error (sc, error_str, 0);
+    }
+
+  if (sc->vptr->list_length (sc, a) != 1)
+    {
+      g_snprintf (error_str, sizeof (error_str),
+                  "(%s) was called with %d arguments. "
+                  "Only a procedure name must be specified.",
+                  proc_name, sc->vptr->list_length (sc, a));
+
+      return implementation_error (sc, error_str, 0);
+    }
+
+  if (! sc->vptr->is_string (sc->vptr->pair_car (a)))
+    return script_type_error (sc, "string", 1, proc_name);
+
+  test_proc_name = sc->vptr->string_value (sc->vptr->pair_car (a));
+
+  exists = gimp_pdb_procedure_exists (gimp_get_pdb (), test_proc_name);
+
+  if (is_interpret_v3_dialect ())
+    return exists ? sc->T : sc->F;
+  else
+    return sc->vptr->cons (sc,
+                           sc->vptr->mk_integer (sc, exists),
+                           sc->NIL);
+}
+
+static pointer
 script_fu_marshal_procedure_call_deprecated (scheme  *sc,
                                              pointer  a)
 {
@@ -1599,13 +1922,13 @@ static pointer
 script_fu_marshal_drawable_filter_configure (scheme             *sc,
                                              pointer             a,
                                              const gchar        *proc_name,
+                                             gint                arg_index,
                                              GimpDrawableFilter *filter)
 {
   pointer                   return_val  = sc->NIL;
   GimpLayerMode             mode        = GIMP_LAYER_MODE_REPLACE;
   gdouble                   opacity     = 1.0;
   GimpDrawableFilterConfig *config;
-  gint                      arg_index;
   gchar                     error_str[1024];
 
   if (sc->vptr->list_length (sc, a) > 0)
@@ -1622,13 +1945,20 @@ script_fu_marshal_drawable_filter_configure (scheme             *sc,
   gimp_drawable_filter_set_opacity (filter, opacity);
   gimp_drawable_filter_set_blend_mode (filter, mode);
 
-  config    = gimp_drawable_filter_get_config (filter);
-  arg_index = 3;
+  config = gimp_drawable_filter_get_config (filter);
   while (sc->vptr->list_length (sc, a) > 1)
     {
       gchar      *argname;
       GParamSpec *arg_spec;
       GValue      value = G_VALUE_INIT;
+
+      if (! sc->vptr->is_arg_name (sc->vptr->pair_car (a)) &&
+          ! sc->vptr->is_string (sc->vptr->pair_car (a)))
+        {
+          g_snprintf (error_str, sizeof (error_str),
+                      "Expected argument name for argument %d", arg_index);
+          return script_error (sc, error_str, 0);
+        }
 
       argname  = g_strdup (sc->vptr->string_value (sc->vptr->pair_car (a)));
       arg_spec = g_object_class_find_property (G_OBJECT_GET_CLASS (config), argname);
@@ -1643,7 +1973,7 @@ script_fu_marshal_drawable_filter_configure (scheme             *sc,
       g_value_init (&value, arg_spec->value_type);
       a = sc->vptr->pair_cdr (a);
 
-      return_val = script_fu_marshal_arg_to_value (sc, a, proc_name, arg_index, arg_spec, &value);
+      return_val = script_fu_marshal_arg_to_value (sc, a, proc_name, arg_index, arg_spec, &value, NULL);
 
       if (return_val != sc->NIL)
         {
@@ -1739,7 +2069,7 @@ script_fu_marshal_drawable_create_filter (scheme              *sc,
     }
   g_free (operation_name);
 
-  return script_fu_marshal_drawable_filter_configure (sc, a, proc_name, *filter);
+  return script_fu_marshal_drawable_filter_configure (sc, a, proc_name, 5, *filter);
 }
 
 static pointer
@@ -1791,7 +2121,7 @@ script_fu_marshal_drawable_filter_configure_call (scheme  *sc,
       a = sc->vptr->pair_cdr (a);
     }
 
-  return script_fu_marshal_drawable_filter_configure (sc, a, proc_name, filter);
+  return script_fu_marshal_drawable_filter_configure (sc, a, proc_name, 3, filter);
 }
 
 static pointer
@@ -1829,8 +2159,7 @@ script_fu_marshal_drawable_filter_set_aux_call (scheme  *sc,
   a = sc->vptr->pair_cdr (a);
 
   if (! sc->vptr->is_string (sc->vptr->pair_car (a)))
-    /*return script_type_error (sc, "string", 1, proc_name);*/
-    return script_type_error (sc, "string", 1, "BLAAA");
+    return script_type_error (sc, "string", 1, proc_name);
 
   pad_name = g_strdup (sc->vptr->string_value (sc->vptr->pair_car (a)));
   a = sc->vptr->pair_cdr (a);

@@ -150,7 +150,7 @@ register_gradient_select_procs (GimpPDB *pdb)
   /*
    * gimp-gradients-popup
    */
-  procedure = gimp_procedure_new (gradients_popup_invoker);
+  procedure = gimp_procedure_new (gradients_popup_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-gradients-popup");
   gimp_procedure_set_static_help (procedure,
@@ -179,7 +179,7 @@ register_gradient_select_procs (GimpPDB *pdb)
                                gimp_param_spec_gradient ("initial-gradient",
                                                          "initial gradient",
                                                          "The initial gradient choice",
-                                                         FALSE,
+                                                         TRUE,
                                                          NULL,
                                                          FALSE,
                                                          GIMP_PARAM_READWRITE));
@@ -195,7 +195,7 @@ register_gradient_select_procs (GimpPDB *pdb)
   /*
    * gimp-gradients-close-popup
    */
-  procedure = gimp_procedure_new (gradients_close_popup_invoker);
+  procedure = gimp_procedure_new (gradients_close_popup_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-gradients-close-popup");
   gimp_procedure_set_static_help (procedure,
@@ -219,7 +219,7 @@ register_gradient_select_procs (GimpPDB *pdb)
   /*
    * gimp-gradients-set-popup
    */
-  procedure = gimp_procedure_new (gradients_set_popup_invoker);
+  procedure = gimp_procedure_new (gradients_set_popup_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-gradients-set-popup");
   gimp_procedure_set_static_help (procedure,

@@ -1,5 +1,5 @@
 # Similarly to libgimpthumb/gimpthumb-enums.c, libgimp/gimpenums.c is
-# not versionned so we don't use the mkenums_wrap.
+# not versioned so we don't use the mkenums_wrap.
 # Moreover it is generated in 2 steps, first with common mkenums
 # arguments, then concatenating with a "tail" file.
 gimpenums_notail = custom_target('gimpenums.c.notail',
@@ -48,7 +48,7 @@ gimpenums_notail = custom_target('gimpenums.c.notail',
 gimpenums = custom_target('gimpenums.c',
   input : [ gimpenums_notail, 'gimpenums.c.tail', ],
   output: [ 'gimpenums.c', ],
-  command: [ 'cat', '@INPUT@' ],
+  command: [python, '-c', 'import sys; [sys.stdout.write(open(f).read()) for f in sys.argv[1:]]','@INPUT@'],
   capture: true,
 )
 
@@ -87,6 +87,7 @@ pdb_wrappers_sources = [
   'gimpgrouplayer_pdb.c',
   'gimphelp_pdb.c',
   'gimpimage_pdb.c',
+  'gimpimageautocrop_pdb.c',
   'gimpimagecolorprofile_pdb.c',
   'gimpimageconvert_pdb.c',
   'gimpimagegrid_pdb.c',
@@ -145,6 +146,7 @@ pdb_wrappers_headers = [
   'gimpgrouplayer_pdb.h',
   'gimphelp_pdb.h',
   'gimpimage_pdb.h',
+  'gimpimageautocrop_pdb.h',
   'gimpimagecolorprofile_pdb.h',
   'gimpimageconvert_pdb.h',
   'gimpimagegrid_pdb.h',

@@ -23,8 +23,8 @@
                                     gradient-reverse)
   (let* (
         (img (car (gimp-image-new width height RGB)))
-        (drawable (car (gimp-layer-new img width height RGB
-                                       "Gradient example" 100 LAYER-MODE-NORMAL)))
+        (drawable (car (gimp-layer-new img "Gradient example" width height RGB
+                                       100 LAYER-MODE-NORMAL)))
 
         ; Calculate colors for checkerboard... just like in the gradient editor
 
@@ -41,7 +41,11 @@
 
     (gimp-context-set-foreground (list fg-color fg-color fg-color))
     (gimp-context-set-background (list bg-color bg-color bg-color))
-    (plug-in-checkerboard RUN-NONINTERACTIVE img (vector drawable) 0 8)
+    (plug-in-checkerboard #:run-mode    RUN-NONINTERACTIVE
+                          #:image       img
+                          #:drawables   (vector drawable)
+                          #:psychobilly 0
+                          #:check-size  8)
 
     (gimp-context-pop)
 

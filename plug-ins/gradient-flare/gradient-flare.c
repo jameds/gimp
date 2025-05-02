@@ -2143,7 +2143,7 @@ calc_get_gradient (guchar *pix, guchar *gradient, gdouble pos)
   gdouble       frac;
   gint          i;
 
-  if (pos < 0 || pos > 1)
+  if (isnan (pos) || pos < 0.0001 || pos > 1)
     {
       pix[0] = pix[1] = pix[2] = pix[3] = 0;
       return;
@@ -5037,9 +5037,7 @@ gradient_get_values_real_external (const gchar *gradient_name,
   GimpGradient  *gradient;
   GeglColor    **colors;
   const Babl    *format = babl_format ("R'G'B'A u8");
-  gdouble      *tmp_values;
-  gint          i;
-  gint          j;
+  gint           i;
 
   gradient = gimp_gradient_get_by_name (gradient_name);
 

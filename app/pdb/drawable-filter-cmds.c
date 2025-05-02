@@ -39,6 +39,8 @@
 #include "core/gimpimage-undo-push.h"
 #include "core/gimpitem.h"
 #include "core/gimpparamspecs.h"
+#include "operations/gimp-operation-config.h"
+#include "operations/gimpoperationsettings.h"
 
 #include "gimppdb.h"
 #include "gimppdberror.h"
@@ -147,6 +149,13 @@ drawable_filter_new_invoker (GimpProcedure         *procedure,
                          "operation", operation_name,
                          NULL);
           filter = gimp_drawable_filter_new (drawable, name, operation, NULL);
+          /* We don't have a libgimp function for setting the clipping
+           * behavior. I want to look further into the whole logic first.
+           * In the meantime if all API-made filters must have a single
+           * clipping behavior, I believe that not-clipping (adjusting) is
+           * the nicer default.
+           */
+          gimp_drawable_filter_set_clip (filter, FALSE);
           g_clear_object (&operation);
         }
     }
@@ -387,18 +396,46 @@ drawable_filter_get_number_arguments_invoker (GimpProcedure         *procedure,
 {
   gboolean success = TRUE;
   GimpValueArray *return_vals;
-  const gchar *operation_name;
+  GimpDrawableFilter *filter;
   gint num_args = 0;
 
-  operation_name = g_value_get_string (gimp_value_array_index (args, 0));
+  filter = g_value_get_object (gimp_value_array_index (args, 0));
 
   if (success)
     {
-      if (gegl_has_operation (operation_name))
+      GeglNode    *node;
+      const gchar *opname;
+
+      node   = gimp_drawable_filter_get_operation (filter);
+      opname = gegl_node_get_operation (node);
+
+      if (gegl_has_operation (opname))
         {
           guint n_properties;
 
-          g_free (gegl_operation_list_properties (operation_name, &n_properties));
+          if (gimp_operation_config_is_custom (gimp, opname))
+            {
+              GimpObject   *settings = NULL;
+              GObjectClass *klass;
+              GObjectClass *parent_klass;
+              guint         n_parent_properties;
+
+              gegl_node_get (node,
+                             "config", &settings,
+                             NULL);
+              klass        = G_OBJECT_GET_CLASS (settings);
+              parent_klass = G_OBJECT_CLASS (g_type_class_peek_parent (klass));
+
+              g_free (g_object_class_list_properties (parent_klass, &n_parent_properties));
+              g_free (g_object_class_list_properties (klass, &n_properties));
+              g_clear_object (&settings);
+              n_properties -= n_parent_properties;
+            }
+          else
+            {
+              g_free (gegl_operation_list_properties (opname, &n_properties));
+            }
+
           num_args = (gint) n_properties;
         }
       else
@@ -426,25 +463,49 @@ drawable_filter_get_pspec_invoker (GimpProcedure         *procedure,
 {
   gboolean success = TRUE;
   GimpValueArray *return_vals;
-  const gchar *operation_name;
+  GimpDrawableFilter *filter;
   gint arg_num;
   GParamSpec *param_spec = NULL;
 
-  operation_name = g_value_get_string (gimp_value_array_index (args, 0));
+  filter = g_value_get_object (gimp_value_array_index (args, 0));
   arg_num = g_value_get_int (gimp_value_array_index (args, 1));
 
   if (success)
     {
-      if (gegl_has_operation (operation_name))
+      GimpObject  *settings = NULL;
+      GeglNode    *node;
+      const gchar *opname;
+
+      node   = gimp_drawable_filter_get_operation (filter);
+      opname = gegl_node_get_operation (node);
+
+      if (gegl_has_operation (opname))
         {
-          GParamSpec **specs;
-          guint        n_properties;
+          GParamSpec  **specs;
+          guint         n_properties;
+          guint         n_parent_properties = 0;
 
-          specs = gegl_operation_list_properties (operation_name, &n_properties);
-
-          if (arg_num >= 0 && arg_num < n_properties)
+          if (gimp_operation_config_is_custom (gimp, opname))
             {
-              param_spec = g_param_spec_ref (specs[arg_num]);
+              GObjectClass *klass;
+              GObjectClass *parent_klass;
+
+              gegl_node_get (node,
+                             "config", &settings,
+                             NULL);
+              klass        = G_OBJECT_GET_CLASS (settings);
+              parent_klass = G_OBJECT_CLASS (g_type_class_peek_parent (klass));
+              g_free (g_object_class_list_properties (parent_klass, &n_parent_properties));
+            }
+
+          if (settings != NULL)
+            specs = g_object_class_list_properties (G_OBJECT_GET_CLASS (settings), &n_properties);
+          else
+            specs = gegl_operation_list_properties (opname, &n_properties);
+
+          if (arg_num >= 0 && n_parent_properties + arg_num < n_properties)
+            {
+              param_spec = g_param_spec_ref (specs[n_parent_properties + arg_num]);
             }
           else
             {
@@ -457,6 +518,8 @@ drawable_filter_get_pspec_invoker (GimpProcedure         *procedure,
         {
           success = FALSE;
         }
+
+      g_clear_object (&settings);
     }
 
   return_vals = gimp_procedure_get_return_values (procedure, success,
@@ -490,23 +553,50 @@ drawable_filter_get_arguments_invoker (GimpProcedure         *procedure,
       const gchar  *opname;
       GParamSpec  **specs;
       guint         n_specs;
+      guint         n_parent_properties = 0;
       GStrvBuilder *names_builder;
+      GimpObject   *settings = NULL;
 
       node   = gimp_drawable_filter_get_operation (filter);
       opname = gegl_node_get_operation (node);
 
-      specs = gegl_operation_list_properties (opname, &n_specs);
+      if (gegl_has_operation (opname) &&
+          gimp_operation_config_is_custom (gimp, opname))
+        {
+          GObjectClass *klass;
+          GObjectClass *parent_klass;
+
+          gegl_node_get (node,
+                         "config", &settings,
+                         NULL);
+          klass        = G_OBJECT_GET_CLASS (settings);
+          parent_klass = G_OBJECT_CLASS (g_type_class_peek_parent (klass));
+          g_free (g_object_class_list_properties (parent_klass, &n_parent_properties));
+        }
+
+      if (settings != NULL)
+        {
+          specs = g_object_class_list_properties (G_OBJECT_GET_CLASS (settings), &n_specs);
+          n_specs -= n_parent_properties;
+        }
+      else
+       {
+         specs = gegl_operation_list_properties (opname, &n_specs);
+       }
 
       names_builder = g_strv_builder_new ();
       values        = gimp_value_array_new (n_specs);
 
       for (gint i = 0; i < n_specs; i++)
         {
-          GParamSpec *pspec = specs[i];
+          GParamSpec *pspec = specs[n_parent_properties + i];
           GValue      value = G_VALUE_INIT;
 
           g_value_init (&value, pspec->value_type);
-          gegl_node_get_property (node, pspec->name, &value);
+          if (settings != NULL)
+            g_object_get_property (G_OBJECT (settings), pspec->name, &value);
+          else
+            gegl_node_get_property (node, pspec->name, &value);
 
           if (GEGL_IS_PARAM_SPEC_ENUM (pspec))
             {
@@ -553,6 +643,7 @@ drawable_filter_get_arguments_invoker (GimpProcedure         *procedure,
 
       g_strv_builder_unref (names_builder);
       g_free (specs);
+      g_clear_object (&settings);
     }
 
   return_vals = gimp_procedure_get_return_values (procedure, success,
@@ -609,7 +700,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-id-is-valid
    */
-  procedure = gimp_procedure_new (drawable_filter_id_is_valid_invoker);
+  procedure = gimp_procedure_new (drawable_filter_id_is_valid_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-id-is-valid");
   gimp_procedure_set_static_help (procedure,
@@ -638,7 +729,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-new
    */
-  procedure = gimp_procedure_new (drawable_filter_new_invoker);
+  procedure = gimp_procedure_new (drawable_filter_new_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-new");
   gimp_procedure_set_static_help (procedure,
@@ -683,7 +774,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-name
    */
-  procedure = gimp_procedure_new (drawable_filter_get_name_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_name_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-name");
   gimp_procedure_set_static_help (procedure,
@@ -714,7 +805,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-operation-name
    */
-  procedure = gimp_procedure_new (drawable_filter_get_operation_name_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_operation_name_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-operation-name");
   gimp_procedure_set_static_help (procedure,
@@ -744,7 +835,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-visible
    */
-  procedure = gimp_procedure_new (drawable_filter_get_visible_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_visible_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-visible");
   gimp_procedure_set_static_help (procedure,
@@ -773,7 +864,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-set-visible
    */
-  procedure = gimp_procedure_new (drawable_filter_set_visible_invoker);
+  procedure = gimp_procedure_new (drawable_filter_set_visible_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-set-visible");
   gimp_procedure_set_static_help (procedure,
@@ -803,7 +894,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-opacity
    */
-  procedure = gimp_procedure_new (drawable_filter_get_opacity_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_opacity_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-opacity");
   gimp_procedure_set_static_help (procedure,
@@ -832,7 +923,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-blend-mode
    */
-  procedure = gimp_procedure_new (drawable_filter_get_blend_mode_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_blend_mode_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-blend-mode");
   gimp_procedure_set_static_help (procedure,
@@ -862,7 +953,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-update
    */
-  procedure = gimp_procedure_new (drawable_filter_update_invoker);
+  procedure = gimp_procedure_new (drawable_filter_update_invoker, TRUE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-update");
   gimp_procedure_set_static_help (procedure,
@@ -945,7 +1036,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-number-arguments
    */
-  procedure = gimp_procedure_new (drawable_filter_get_number_arguments_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_number_arguments_invoker, TRUE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-number-arguments");
   gimp_procedure_set_static_help (procedure,
@@ -958,12 +1049,11 @@ register_drawable_filter_procs (GimpPDB *pdb)
                                          "Jehan",
                                          "2024");
   gimp_procedure_add_argument (procedure,
-                               gimp_param_spec_string ("operation-name",
-                                                       "operation name",
-                                                       "The procedure name",
-                                                       FALSE, FALSE, TRUE,
-                                                       NULL,
-                                                       GIMP_PARAM_READWRITE));
+                               gimp_param_spec_drawable_filter ("filter",
+                                                                "filter",
+                                                                "The filter",
+                                                                FALSE,
+                                                                GIMP_PARAM_READWRITE));
   gimp_procedure_add_return_value (procedure,
                                    g_param_spec_int ("num-args",
                                                      "num args",
@@ -976,7 +1066,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-pspec
    */
-  procedure = gimp_procedure_new (drawable_filter_get_pspec_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_pspec_invoker, TRUE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-pspec");
   gimp_procedure_set_static_help (procedure,
@@ -988,12 +1078,11 @@ register_drawable_filter_procs (GimpPDB *pdb)
                                          "Jehan",
                                          "2024");
   gimp_procedure_add_argument (procedure,
-                               gimp_param_spec_string ("operation-name",
-                                                       "operation name",
-                                                       "The procedure name",
-                                                       FALSE, FALSE, TRUE,
-                                                       NULL,
-                                                       GIMP_PARAM_READWRITE));
+                               gimp_param_spec_drawable_filter ("filter",
+                                                                "filter",
+                                                                "The filter",
+                                                                FALSE,
+                                                                GIMP_PARAM_READWRITE));
   gimp_procedure_add_argument (procedure,
                                g_param_spec_int ("arg-num",
                                                  "arg num",
@@ -1012,7 +1101,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-get-arguments
    */
-  procedure = gimp_procedure_new (drawable_filter_get_arguments_invoker);
+  procedure = gimp_procedure_new (drawable_filter_get_arguments_invoker, TRUE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-get-arguments");
   gimp_procedure_set_static_help (procedure,
@@ -1047,7 +1136,7 @@ register_drawable_filter_procs (GimpPDB *pdb)
   /*
    * gimp-drawable-filter-delete
    */
-  procedure = gimp_procedure_new (drawable_filter_delete_invoker);
+  procedure = gimp_procedure_new (drawable_filter_delete_invoker, FALSE);
   gimp_object_set_static_name (GIMP_OBJECT (procedure),
                                "gimp-drawable-filter-delete");
   gimp_procedure_set_static_help (procedure,

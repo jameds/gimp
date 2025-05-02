@@ -929,6 +929,10 @@ gimp_filter_tool_options_notify (GimpTool         *tool,
           gimp_item_set_visible (GIMP_ITEM (drawable), TRUE, FALSE);
           gimp_image_flush (gimp_item_get_image (GIMP_ITEM (drawable)));
         }
+
+      g_object_set (filter_tool->filter,
+                    "to-be-merged", filter_options->merge_filter,
+                    NULL);
     }
   else if (! strcmp (pspec->name, "controller") &&
            filter_tool->widget)
@@ -1090,8 +1094,7 @@ gimp_filter_tool_real_config_notify (GimpFilterTool   *filter_tool,
         {
           if (! strcmp (pspec->name, "gimp-clip")    ||
               ! strcmp (pspec->name, "gimp-mode")    ||
-              ! strcmp (pspec->name, "gimp-opacity") ||
-              ! strcmp (pspec->name, "gimp-gamma-hack"))
+              ! strcmp (pspec->name, "gimp-opacity"))
             {
               gimp_filter_tool_update_filter (filter_tool);
             }
@@ -1326,12 +1329,16 @@ gimp_filter_tool_commit (GimpFilterTool *filter_tool,
 
       if (non_destructive && ! filter_tool->existing_filter)
         {
-          GimpDrawable *drawable =
-            gimp_drawable_filter_get_drawable (filter_tool->filter);
+          GimpDrawable *drawable;
+          const gchar  *filter_name;
+
+          drawable = gimp_drawable_filter_get_drawable (filter_tool->filter);
+
+          filter_name = gimp_object_get_name (filter_tool->filter);
 
           gimp_image_undo_push_filter_add (gimp_display_get_image (tool->display),
-                                           _("Add filter"),
-                                           drawable, filter_tool->filter);
+                                           filter_name, drawable,
+                                           filter_tool->filter);
         }
 
       drawable = gimp_drawable_filter_get_drawable (filter_tool->filter);
@@ -1342,9 +1349,13 @@ gimp_filter_tool_commit (GimpFilterTool *filter_tool,
 
       gimp_filter_tool_remove_guide (filter_tool);
 
-      gimp_item_set_visible (GIMP_ITEM (drawable), FALSE, FALSE);
-      gimp_image_flush (gimp_display_get_image (tool->display));
-      gimp_item_set_visible (GIMP_ITEM (drawable), TRUE, FALSE);
+      /* TODO: Review when we can apply NDE filters to channels/layer masks */
+      if (GIMP_IS_LAYER (drawable))
+        {
+          gimp_item_set_visible (GIMP_ITEM (drawable), FALSE, FALSE);
+          gimp_image_flush (gimp_display_get_image (tool->display));
+          gimp_item_set_visible (GIMP_ITEM (drawable), TRUE, FALSE);
+        }
       gimp_image_flush (gimp_display_get_image (tool->display));
 
       if (filter_tool->config && filter_tool->has_settings)
@@ -1381,9 +1392,7 @@ gimp_filter_tool_dialog (GimpFilterTool *filter_tool)
 static void
 gimp_filter_tool_update_dialog_operation_settings (GimpFilterTool *filter_tool)
 {
-  GimpTool          *tool    = GIMP_TOOL (filter_tool);
   GimpFilterOptions *options = GIMP_FILTER_TOOL_GET_OPTIONS (filter_tool);
-  GimpImage         *image   = gimp_display_get_image (tool->display);
 
   if (filter_tool->operation_settings_box)
     {
@@ -1398,7 +1407,6 @@ gimp_filter_tool_update_dialog_operation_settings (GimpFilterTool *filter_tool)
           GtkWidget *vbox2;
           GtkWidget *mode_box;
           GtkWidget *scale;
-          GtkWidget *toggle;
 
           vbox = filter_tool->operation_settings_box;
 
@@ -1459,35 +1467,6 @@ gimp_filter_tool_update_dialog_operation_settings (GimpFilterTool *filter_tool)
           gtk_box_pack_start (GTK_BOX (vbox2), scale,
                               FALSE, FALSE, 0);
           gtk_widget_show (scale);
-
-          /*  The Color Options expander  */
-          expander = gtk_expander_new (_("Advanced Color Options"));
-          gtk_box_pack_start (GTK_BOX (vbox), expander,
-                              FALSE, FALSE, 0);
-
-          g_object_bind_property (image->gimp->config,
-                                  "filter-tool-show-color-options",
-                                  expander, "visible",
-                                  G_BINDING_SYNC_CREATE);
-          g_object_bind_property (options,  "color-options-expanded",
-                                  expander, "expanded",
-                                  G_BINDING_SYNC_CREATE |
-                                  G_BINDING_BIDIRECTIONAL);
-
-          frame = gimp_frame_new (NULL);
-          gtk_container_add (GTK_CONTAINER (expander), frame);
-          gtk_widget_show (frame);
-
-          vbox2 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
-          gtk_container_add (GTK_CONTAINER (frame), vbox2);
-          gtk_widget_show (vbox2);
-
-          /*  The gamma hack toggle  */
-          toggle = gimp_prop_check_button_new (filter_tool->config,
-                                               "gimp-gamma-hack", NULL);
-          gtk_box_pack_start (GTK_BOX (vbox2), toggle,
-                              FALSE, FALSE, 0);
-          gtk_widget_show (toggle);
         }
     }
 }
@@ -1567,6 +1546,10 @@ gimp_filter_tool_create_filter (GimpFilterTool *filter_tool)
    * aux nodes can be non-destructive */
   if (gegl_node_has_pad (filter_tool->operation, "aux"))
     options->merge_filter = TRUE;
+
+  g_object_set (filter_tool->filter,
+                "to-be-merged", options->merge_filter,
+                NULL);
 
   if (options->merge_filter)
     {
@@ -2219,8 +2202,9 @@ gimp_filter_tool_set_config (GimpFilterTool *filter_tool,
         }
 
       g_object_set (filter_tool->filter,
-                    "name", name,
-                    "mask", mask,
+                    "name",      name,
+                    "mask",      mask,
+                    "temporary", TRUE,
                     NULL);
     }
 }
